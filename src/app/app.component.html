@@ -422,6 +422,8 @@
           </span>
         </div>
 
+        <app-repo-context-bar [repo]="session.repo" />
+
         <div class="narrative-hero">
           <h1 id="process-live-headline" class="narrative-headline" aria-live="polite">
             {{ imperativeHeadline(session.currentStep.headline) }}
@@ -556,6 +558,9 @@
               </button>
             </div>
           </div>
+
+          <!-- Real-Time GitHub Repository Stars, Forks & Last Update Date Display Component -->
+          <app-repo-context-bar [repo]="session.repo" />
 
           @if (fbAuth.saveSuccessBanner(); as saveMsg) {
             <div class="save-account-toast" role="status" aria-live="polite">

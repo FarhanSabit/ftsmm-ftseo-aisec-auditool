@@ -231,3 +231,20 @@ export interface UserSessionState {
   savedAuditsCount: number;
 }
 
+export interface GitHubRepoRealtimeStats {
+  fullName: string;
+  owner: string;
+  repo: string;
+  htmlUrl: string;
+  stars: number;
+  forks: number;
+  openIssues: number;
+  watchers: number;
+  defaultBranch: string;
+  language: string;
+  updatedAt: string;
+  description: string;
+  source: 'github-live' | 'sandbox-live' | 'github-fallback';
+}
+
+

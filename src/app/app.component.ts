@@ -4,6 +4,7 @@ import { AuditService } from './services/audit.service';
 import { FirebaseAuthService } from './services/firebase-auth.service';
 import { FresnelLogoComponent } from './components/fresnel-logo/fresnel-logo.component';
 import { ImpactRadarChartComponent } from './components/impact-radar-chart/impact-radar-chart.component';
+import { RepoContextBarComponent } from './components/repo-context-bar/repo-context-bar.component';
 import { LighthouseCategory, SavedAuditHistoryRecord } from './models/audit.model';
 
 export interface CategoryTabItem {
@@ -15,7 +16,7 @@ export interface CategoryTabItem {
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [FormsModule, FresnelLogoComponent, ImpactRadarChartComponent],
+  imports: [FormsModule, FresnelLogoComponent, ImpactRadarChartComponent, RepoContextBarComponent],
   templateUrl: './app.component.html',
   styleUrl: './app.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush
