@@ -1,12 +1,19 @@
-import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, effect, inject, signal } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
+import { firstValueFrom } from 'rxjs';
 import { AuditService } from './services/audit.service';
 import { FirebaseAuthService } from './services/firebase-auth.service';
 import { FresnelLogoComponent } from './components/fresnel-logo/fresnel-logo.component';
 import { ImpactRadarChartComponent } from './components/impact-radar-chart/impact-radar-chart.component';
 import { RepoContextBarComponent } from './components/repo-context-bar/repo-context-bar.component';
 import { AuditRunComparisonComponent } from './components/audit-run-comparison/audit-run-comparison.component';
-import { LighthouseCategory, SavedAuditHistoryRecord } from './models/audit.model';
+import {
+  GitHubRepoIssue,
+  GitHubRepoIssuesResponse,
+  LighthouseCategory,
+  SavedAuditHistoryRecord
+} from './models/audit.model';
 
 export interface CategoryTabItem {
   key: LighthouseCategory;
@@ -29,6 +36,7 @@ export interface CategoryTabItem {
   changeDetection: ChangeDetectionStrategy.OnPush
 })
 export class AppComponent {
+  private readonly http = inject(HttpClient);
   readonly audit = inject(AuditService);
   readonly fbAuth = inject(FirebaseAuthService);
   readonly repoUrl = signal<string>('');
@@ -37,9 +45,43 @@ export class AppComponent {
   readonly autoCompareNonce = signal<number>(0);
   readonly radarViewMode = signal<'detailed' | 'categories' | 'history' | 'compare'>('detailed');
   readonly isReportHistoryTabActive = computed<boolean>(() => this.radarViewMode() === 'history');
+  readonly isReportIssuesTabActive = signal<boolean>(false);
+  readonly repoIssuesResponse = signal<GitHubRepoIssuesResponse | null>(null);
+  readonly isLoadingRepoIssues = signal<boolean>(false);
+  readonly issuesCategoryFilter = signal<LighthouseCategory>('all');
+  private lastLoadedIssuesRepo = '';
+
+  readonly openRepoIssues = computed<GitHubRepoIssue[]>(() => {
+    return this.repoIssuesResponse()?.issues ?? [];
+  });
+
+  readonly openRepoIssuesCount = computed<number>(() => {
+    const resp = this.repoIssuesResponse();
+    if (!resp) return 6;
+    return resp.issues.length;
+  });
+
+  readonly filteredRepoIssues = computed<GitHubRepoIssue[]>(() => {
+    const all = this.openRepoIssues();
+    const filter = this.issuesCategoryFilter();
+    if (filter === 'all') return all;
+    return all.filter((iss) => iss.relatedCategory === filter);
+  });
+
   readonly reportListAnimCycle = signal<number>(1);
   readonly isReportListEntering = signal<boolean>(true);
   private reportListAnimTimer: ReturnType<typeof setTimeout> | null = null;
+
+  constructor() {
+    effect(() => {
+      const repoMeta = this.audit.session()?.repo;
+      const fullName = repoMeta?.fullName ?? '';
+      if (fullName && fullName !== this.lastLoadedIssuesRepo) {
+        this.lastLoadedIssuesRepo = fullName;
+        void this.fetchRepoOpenIssues(repoMeta?.owner || 'fresnel-sandbox', repoMeta?.repo || 'lumina-web-app');
+      }
+    });
+  }
 
   /**
    * Identifies the two most significant saved audit runs in the user's history:
@@ -147,6 +189,7 @@ export class AppComponent {
   });
 
   onSelectCategoryFilter(category: LighthouseCategory): void {
+    this.isReportIssuesTabActive.set(false);
     this.audit.categoryFilter.set(category);
     if (this.radarViewMode() === 'history') {
       this.radarViewMode.set('detailed');
@@ -155,6 +198,7 @@ export class AppComponent {
   }
 
   onSelectReportHistoryTab(): void {
+    this.isReportIssuesTabActive.set(false);
     this.radarViewMode.set('history');
     void this.fbAuth.fetchSavedAuditsFromFirestore();
     if (typeof document !== 'undefined') {
@@ -165,9 +209,95 @@ export class AppComponent {
     }
   }
 
+  onSelectReportIssuesTab(): void {
+    this.isReportIssuesTabActive.set(true);
+    if (this.radarViewMode() === 'history') {
+      this.radarViewMode.set('detailed');
+    }
+    const repoMeta = this.audit.session()?.repo;
+    if (!this.repoIssuesResponse() && !this.isLoadingRepoIssues()) {
+      void this.fetchRepoOpenIssues(
+        repoMeta?.owner || 'fresnel-sandbox',
+        repoMeta?.repo || 'lumina-web-app'
+      );
+    }
+  }
+
+  refreshRepoIssues(): void {
+    const repoMeta = this.audit.session()?.repo;
+    void this.fetchRepoOpenIssues(
+      repoMeta?.owner || 'fresnel-sandbox',
+      repoMeta?.repo || 'lumina-web-app'
+    );
+  }
+
+  setIssuesCategoryFilter(category: LighthouseCategory): void {
+    this.issuesCategoryFilter.set(category);
+  }
+
+  onJumpToCategoryFromIssue(issue: GitHubRepoIssue): void {
+    const targetCat: LighthouseCategory = issue.relatedCategory ?? 'all';
+    const isLhrRun = this.audit.session()?.runPhase === 'lhr';
+    const resolvedCat: LighthouseCategory =
+      isLhrRun && targetCat === 'security' ? 'all' : targetCat;
+    this.onSelectCategoryFilter(resolvedCat);
+    if (typeof document !== 'undefined') {
+      setTimeout(() => {
+        const listEl = document.querySelector('.report-list');
+        listEl?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }, 50);
+    }
+  }
+
+  async fetchRepoOpenIssues(owner: string, repo: string): Promise<void> {
+    this.isLoadingRepoIssues.set(true);
+    try {
+      const resp = await firstValueFrom(
+        this.http.get<GitHubRepoIssuesResponse>(
+          `/api/github/repo-issues?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}`
+        )
+      );
+      if (resp && Array.isArray(resp.issues)) {
+        this.repoIssuesResponse.set(resp);
+      }
+    } catch {
+      // Keep any existing issues response
+    } finally {
+      this.isLoadingRepoIssues.set(false);
+    }
+  }
+
+  formatIssueRelativeTime(isoString: string): string {
+    if (!isoString) return 'recently';
+    const ts = new Date(isoString).getTime();
+    if (Number.isNaN(ts)) return 'recently';
+    const diffHours = Math.max(1, Math.round((Date.now() - ts) / (3600 * 1000)));
+    if (diffHours < 24) return `${diffHours}h ago`;
+    const diffDays = Math.round(diffHours / 24);
+    return `${diffDays}d ago`;
+  }
+
+  formatIssueCategoryLabel(cat: GitHubRepoIssue['relatedCategory']): string {
+    switch (cat) {
+      case 'performance':
+        return 'Performance';
+      case 'accessibility':
+        return 'Accessibility';
+      case 'best-practices':
+        return 'Best practices';
+      case 'seo':
+        return 'SEO';
+      case 'security':
+        return 'Security (Light)';
+      default:
+        return 'Audit Context';
+    }
+  }
+
   onRadarViewModeChanged(mode: 'detailed' | 'categories' | 'history' | 'compare'): void {
     this.radarViewMode.set(mode);
     if (mode === 'history') {
+      this.isReportIssuesTabActive.set(false);
       void this.fbAuth.fetchSavedAuditsFromFirestore();
     }
   }

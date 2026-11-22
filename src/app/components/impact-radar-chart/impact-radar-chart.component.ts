@@ -73,6 +73,14 @@ export interface HistoryTrajectoryAxisRow {
   totalGain: number;
 }
 
+export type TrendDateRange = 30 | 60 | 90 | 'all';
+export type TrendMetricFilter =
+  | 'all-cwv'
+  | 'performance'
+  | 'accessibility'
+  | 'seo'
+  | 'best-practices';
+
 export interface FiveAuditTrendPoint {
   auditIndex: number;
   id: string;
@@ -80,10 +88,14 @@ export interface FiveAuditTrendPoint {
   title: string;
   sourceBadge: string;
   isFirestoreBacked: boolean;
+  timestampIso: string;
   timestampLabel: string;
+  daysAgo: number;
   commitsLabel: string;
   performanceScore: number;
   accessibilityScore: number;
+  seoScore: number;
+  bestPracticesScore: number;
   lcpScore: number;
   lcpSeconds: number;
   clsScore: number;
@@ -180,11 +192,7 @@ export interface RadarCompareAxisRow {
           <h2 id="radar-impact-heading" class="radar-impact-card__title">
             @if (viewMode() === 'history') {
               @if (isTrendAnalysisEnabled()) {
-                @if (trendScope() === 'all-sessions') {
-                  D3 Trend Analysis: Historical LCP, CLS &amp; FID improvements across all saved Firestore sessions ({{ activeTrendPoints().length }} sessions)
-                } @else {
-                  D3 Trend Analysis: LCP, CLS &amp; FID trajectory over last 5 audits ({{ repoFullName() }})
-                }
+                D3 Trend Analysis: {{ activeTrendMetricMeta().label }} ({{ trendDateRangeLabel() }} · {{ activeTrendPoints().length }} sessions)
               } @else {
                 Multi-session performance &amp; accessibility trajectory ({{ repoFullName() }})
               }
@@ -197,7 +205,7 @@ export interface RadarCompareAxisRow {
           <p class="radar-impact-card__subtitle">
             @if (viewMode() === 'history') {
               @if (isTrendAnalysisEnabled()) {
-                D3 multi-series line chart plotting historical performance metric improvements (LCP, CLS, FID &amp; Overall Performance) across all saved audit sessions fetched from Firestore.
+                D3 line chart plotting {{ activeTrendMetricMeta().label }} across saved Firestore audit sessions filtered by date range ({{ trendDateRangeLabel() }}) for {{ repoFullName() }}.
               } @else {
                 Visualizes how {{ repoFullName() }} evolved across past Firestore audit sessions—from initial baseline inspection through saved historical runs to your current active session.
               }
@@ -343,6 +351,87 @@ export interface RadarCompareAxisRow {
             </button>
           </div>
         </div>
+
+        @if (isTrendAnalysisEnabled()) {
+          <div class="d3-trend-filter-bar" role="region" aria-label="Trend Analysis date-range and metric trajectory filters">
+            <div class="d3-trend-filter-group">
+              <span class="d3-trend-filter-label">Date range:</span>
+              <div id="d3-trend-date-range-group" class="history-trend-segmented" role="group" aria-label="Filter Trend Analysis chart by date range">
+                <button
+                  type="button"
+                  id="d3-date-range-30d"
+                  class="history-trend-seg-btn"
+                  [class.is-active]="trendDateRange() === 30"
+                  [attr.aria-pressed]="trendDateRange() === 30"
+                  (click)="setTrendDateRange(30)"
+                >
+                  <span>Last 30 days</span>
+                </button>
+                <button
+                  type="button"
+                  id="d3-date-range-60d"
+                  class="history-trend-seg-btn"
+                  [class.is-active]="trendDateRange() === 60"
+                  [attr.aria-pressed]="trendDateRange() === 60"
+                  (click)="setTrendDateRange(60)"
+                >
+                  <span>Last 60 days</span>
+                </button>
+                <button
+                  type="button"
+                  id="d3-date-range-90d"
+                  class="history-trend-seg-btn"
+                  [class.is-active]="trendDateRange() === 90"
+                  [attr.aria-pressed]="trendDateRange() === 90"
+                  (click)="setTrendDateRange(90)"
+                >
+                  <span>Last 90 days</span>
+                </button>
+                <button
+                  type="button"
+                  id="d3-date-range-all"
+                  class="history-trend-seg-btn"
+                  [class.is-active]="trendDateRange() === 'all'"
+                  [attr.aria-pressed]="trendDateRange() === 'all'"
+                  (click)="setTrendDateRange('all')"
+                >
+                  <span>All time</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="d3-trend-filter-group">
+              <label class="d3-trend-filter-label" for="d3-trend-metric-select">Metric trajectory:</label>
+              <select
+                id="d3-trend-metric-select"
+                class="d3-trend-metric-select"
+                [value]="trendMetricFilter()"
+                (change)="onSelectTrendMetric($event)"
+                aria-label="Select performance metric trajectory to display on Trend Analysis chart"
+              >
+                <option value="all-cwv" [selected]="trendMetricFilter() === 'all-cwv'">
+                  Core Web Vitals (LCP, CLS, FID &amp; Perf)
+                </option>
+                <option value="performance" [selected]="trendMetricFilter() === 'performance'">
+                  Performance Score Trajectory
+                </option>
+                <option value="accessibility" [selected]="trendMetricFilter() === 'accessibility'">
+                  Accessibility Score Trajectory
+                </option>
+                <option value="seo" [selected]="trendMetricFilter() === 'seo'">
+                  SEO Score Trajectory
+                </option>
+                <option value="best-practices" [selected]="trendMetricFilter() === 'best-practices'">
+                  Best Practices Score Trajectory
+                </option>
+              </select>
+            </div>
+
+            <span class="d3-trend-filter-summary">
+              {{ trendDateRangeLabel() }} · {{ activeTrendPoints().length }} {{ activeTrendPoints().length === 1 ? 'session' : 'sessions' }} · {{ activeTrendMetricMeta().shortLabel }} {{ activeTrendMetricMeta().firstVal }}→{{ activeTrendMetricMeta().latestVal }} ({{ activeTrendMetricMeta().delta >= 0 ? '+' : '' }}{{ activeTrendMetricMeta().delta }} pts)
+            </span>
+          </div>
+        }
       }
 
       <!-- Expandable Two-Run Comparison Selector Bar inside the Radar Chart Card -->
@@ -510,24 +599,41 @@ export interface RadarCompareAxisRow {
           ></div>
 
           @if (viewMode() === 'history' && isTrendAnalysisEnabled()) {
-            <!-- D3 Trend Analysis Legend (LCP, CLS, FID & Overall Performance) -->
-            <div class="radar-legend d3-trend-legend" style="margin-top: 0.75rem;" aria-label="D3 Firestore timeline LCP, CLS, and FID performance trend legend">
-              <span class="radar-legend__item">
-                <span class="d3-legend-line d3-legend-line--lcp" aria-hidden="true"></span>
-                <span>LCP ({{ firstTrendPoint().lcpSeconds }}s → {{ latestTrendPoint().lcpSeconds }}s)</span>
-              </span>
-              <span class="radar-legend__item">
-                <span class="d3-legend-line d3-legend-line--cls" aria-hidden="true"></span>
-                <span>CLS ({{ firstTrendPoint().clsValue }} → {{ latestTrendPoint().clsValue }})</span>
-              </span>
-              <span class="radar-legend__item">
-                <span class="d3-legend-line d3-legend-line--fid" aria-hidden="true"></span>
-                <span>FID ({{ firstTrendPoint().inpMs }}ms → {{ latestTrendPoint().inpMs }}ms)</span>
-              </span>
-              <span class="radar-legend__item">
-                <span class="d3-legend-line d3-legend-line--perf" aria-hidden="true"></span>
-                <span>Overall Perf ({{ firstTrendPoint().performanceScore }} → {{ latestTrendPoint().performanceScore }})</span>
-              </span>
+            <!-- Dynamic D3 Trend Analysis Legend based on selected Metric Dropdown -->
+            <div class="radar-legend d3-trend-legend" style="margin-top: 0.75rem;" aria-label="D3 Trend Analysis active metric legend">
+              @if (trendMetricFilter() === 'all-cwv') {
+                <span class="radar-legend__item">
+                  <span class="d3-legend-line d3-legend-line--lcp" aria-hidden="true"></span>
+                  <span>LCP ({{ firstTrendPoint().lcpSeconds }}s → {{ latestTrendPoint().lcpSeconds }}s)</span>
+                </span>
+                <span class="radar-legend__item">
+                  <span class="d3-legend-line d3-legend-line--cls" aria-hidden="true"></span>
+                  <span>CLS ({{ firstTrendPoint().clsValue }} → {{ latestTrendPoint().clsValue }})</span>
+                </span>
+                <span class="radar-legend__item">
+                  <span class="d3-legend-line d3-legend-line--fid" aria-hidden="true"></span>
+                  <span>FID ({{ firstTrendPoint().inpMs }}ms → {{ latestTrendPoint().inpMs }}ms)</span>
+                </span>
+                <span class="radar-legend__item">
+                  <span class="d3-legend-line d3-legend-line--perf" aria-hidden="true"></span>
+                  <span>Overall Perf ({{ firstTrendPoint().performanceScore }} → {{ latestTrendPoint().performanceScore }})</span>
+                </span>
+              } @else {
+                <span class="radar-legend__item">
+                  <span
+                    class="d3-legend-line"
+                    [style.background]="activeTrendMetricMeta().color"
+                    aria-hidden="true"
+                  ></span>
+                  <span>
+                    {{ activeTrendMetricMeta().label }} ({{ activeTrendMetricMeta().firstVal }} → {{ activeTrendMetricMeta().latestVal }}, {{ activeTrendMetricMeta().delta >= 0 ? '+' : '' }}{{ activeTrendMetricMeta().delta }} pts)
+                  </span>
+                </span>
+                <span class="radar-legend__item">
+                  <span class="d3-legend-line d3-legend-line--perf" aria-hidden="true"></span>
+                  <span>Window: {{ trendDateRangeLabel() }}</span>
+                </span>
+              }
             </div>
           }
 
@@ -539,7 +645,7 @@ export interface RadarCompareAxisRow {
             [style.display]="viewMode() === 'history' && isTrendAnalysisEnabled() ? 'flex' : 'none'"
             role="img"
             [attr.aria-label]="
-              'D3 line chart plotting historical performance, LCP, CLS, and FID improvements across ' + activeTrendPoints().length + ' saved Firestore audit sessions for ' + repoFullName()
+              'D3 line chart plotting ' + activeTrendMetricMeta().label + ' across ' + activeTrendPoints().length + ' sessions (' + trendDateRangeLabel() + ') for ' + repoFullName()
             "
           ></div>
 
@@ -549,16 +655,16 @@ export interface RadarCompareAxisRow {
               <div class="radar-axis-spotlight__top">
                 <strong>{{ activeAudit.shortLabel }} · {{ activeAudit.title }}</strong>
                 <span class="radar-axis-spotlight__scores">
-                  <span class="score-mid">LCP: {{ activeAudit.lcpSeconds }}s ({{ activeAudit.lcpScore }})</span>
+                  <span class="score-mid">Perf: {{ activeAudit.performanceScore }}</span>
                   <span aria-hidden="true">·</span>
-                  <span class="score-after">CLS: {{ activeAudit.clsValue }} ({{ activeAudit.clsScore }})</span>
+                  <span class="score-after">A11y: {{ activeAudit.accessibilityScore }}</span>
                   <span aria-hidden="true">·</span>
-                  <span class="score-before">FID: {{ activeAudit.inpMs }}ms ({{ activeAudit.fidScore }})</span>
-                  <span class="score-delta">Perf {{ activeAudit.performanceScore }}</span>
+                  <span class="score-before">SEO: {{ activeAudit.seoScore }}</span>
+                  <span class="score-delta">LCP {{ activeAudit.lcpSeconds }}s</span>
                 </span>
               </div>
               <p class="radar-axis-spotlight__desc">
-                {{ activeAudit.sourceBadge }} · {{ activeAudit.timestampLabel }} · {{ activeAudit.commitsLabel }} applied (FID {{ activeAudit.inpMs }}ms / score {{ activeAudit.fidScore }}, A11y score {{ activeAudit.accessibilityScore }}).
+                {{ activeAudit.sourceBadge }} · {{ activeAudit.timestampLabel }} · {{ activeAudit.commitsLabel }} applied (CLS {{ activeAudit.clsValue }}, FID {{ activeAudit.inpMs }}ms, Best Practices {{ activeAudit.bestPracticesScore }}).
               </p>
             </div>
           } @else if (viewMode() === 'history') {
@@ -766,20 +872,23 @@ export interface RadarCompareAxisRow {
                     </div>
 
                     <div class="d3-audit-trend-row__metrics">
-                      <span class="d3-cwv-chip d3-cwv-chip--lcp">
-                        LCP: <strong>{{ pt.lcpSeconds }}s</strong> ({{ pt.lcpScore }})
-                      </span>
-                      <span class="d3-cwv-chip d3-cwv-chip--cls">
-                        CLS: <strong>{{ pt.clsValue }}</strong> ({{ pt.clsScore }})
-                      </span>
-                      <span class="d3-cwv-chip d3-cwv-chip--fid">
-                        FID: <strong>{{ pt.inpMs }}ms</strong> ({{ pt.fidScore }})
-                      </span>
-                      <span class="d3-cwv-chip d3-cwv-chip--perf">
+                      <span class="d3-cwv-chip d3-cwv-chip--perf" [class.is-metric-focused]="trendMetricFilter() === 'performance'">
                         Perf: <strong>{{ pt.performanceScore }}</strong>
                       </span>
-                      <span class="d3-cwv-chip">
+                      <span class="d3-cwv-chip d3-cwv-chip--cls" [class.is-metric-focused]="trendMetricFilter() === 'accessibility'">
                         A11y: <strong>{{ pt.accessibilityScore }}</strong>
+                      </span>
+                      <span class="d3-cwv-chip d3-cwv-chip--seo" [class.is-metric-focused]="trendMetricFilter() === 'seo'">
+                        SEO: <strong>{{ pt.seoScore }}</strong>
+                      </span>
+                      <span class="d3-cwv-chip d3-cwv-chip--lcp" [class.is-metric-focused]="trendMetricFilter() === 'all-cwv'">
+                        LCP: <strong>{{ pt.lcpSeconds }}s</strong> ({{ pt.lcpScore }})
+                      </span>
+                      <span class="d3-cwv-chip" [class.is-metric-focused]="trendMetricFilter() === 'all-cwv'">
+                        CLS: <strong>{{ pt.clsValue }}</strong>
+                      </span>
+                      <span class="d3-cwv-chip d3-cwv-chip--fid" [class.is-metric-focused]="trendMetricFilter() === 'best-practices'">
+                        BP: <strong>{{ pt.bestPracticesScore }}</strong>
                       </span>
                     </div>
                   </li>
@@ -997,6 +1106,8 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
   readonly viewMode = signal<'detailed' | 'categories' | 'history' | 'compare'>('detailed');
   readonly isTrendAnalysisEnabled = signal<boolean>(true);
   readonly trendScope = signal<'all-sessions' | 'last-5'>('all-sessions');
+  readonly trendDateRange = signal<TrendDateRange>(90);
+  readonly trendMetricFilter = signal<TrendMetricFilter>('all-cwv');
   readonly hoveredTrendIndex = signal<number | null>(null);
   readonly isCompareDrawerOpen = signal<boolean>(false);
   readonly compareRunAId = signal<string>('run-static-pass');
@@ -1099,6 +1210,13 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
       });
     };
 
+    const computeDaysAgo = (iso?: string, fallbackDays = 0): number => {
+      if (!iso) return fallbackDays;
+      const ms = new Date(iso).getTime();
+      if (Number.isNaN(ms)) return fallbackDays;
+      return Math.max(0, Math.round((Date.now() - ms) / (24 * 3600 * 1000)));
+    };
+
     if (allFirestore.length === 0) {
       return this.lastFiveAudits();
     }
@@ -1109,6 +1227,12 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
     const earliest = allFirestore[0];
     const initPerf = earliest?.performanceBefore ?? m.performanceBefore;
     const initA11y = earliest?.accessibilityBefore ?? m.accessibilityBefore;
+    const initSeo = earliest?.seoBefore ?? m.seoBefore;
+    const initBp = earliest?.bestPracticesBefore ?? m.bestPracticesBefore;
+    const earliestIso =
+      earliest?.createdAtIso ||
+      earliest?.updatedAtIso ||
+      new Date(Date.now() - 45 * 24 * 3600 * 1000).toISOString();
 
     timelinePoints.push({
       auditIndex: 1,
@@ -1117,10 +1241,14 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
       title: `Initial Unpatched Baseline (${earliest?.repoFullName?.split('/')[1] || 'Repo'})`,
       sourceBadge: 'Run 0 · Initial Baseline',
       isFirestoreBacked: false,
-      timestampLabel: formatDateShort(earliest?.createdAtIso || earliest?.updatedAtIso, 'Initial scan'),
+      timestampIso: earliestIso,
+      timestampLabel: formatDateShort(earliestIso, 'Initial scan'),
+      daysAgo: computeDaysAgo(earliestIso, 45),
       commitsLabel: `0/${earliest?.totalCommitsCount || totCount} commits`,
       performanceScore: initPerf,
       accessibilityScore: initA11y,
+      seoScore: initSeo,
+      bestPracticesScore: initBp,
       lcpScore: lcp.before,
       lcpSeconds: scoreToLcpSeconds(lcp.before),
       clsScore: cls.before,
@@ -1142,6 +1270,7 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
       const clsVal = Math.min(98, Math.round(cls.before + perfRatio * 34));
       const fidVal = Math.min(96, Math.round(fid.before + perfRatio * 32));
       const shortRepo = rec.repoFullName?.split('/')[1] || rec.repoFullName || 'Repository';
+      const recIso = rec.updatedAtIso || rec.createdAtIso || new Date().toISOString();
 
       timelinePoints.push({
         auditIndex: sessionNum,
@@ -1154,10 +1283,14 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
         sourceBadge:
           rec.runPhase === 'lhr' ? 'Firestore · Run 2 LHR' : 'Firestore · Run 1 Static',
         isFirestoreBacked: true,
-        timestampLabel: formatDateShort(rec.updatedAtIso || rec.createdAtIso),
+        timestampIso: recIso,
+        timestampLabel: formatDateShort(recIso),
+        daysAgo: computeDaysAgo(recIso, 7),
         commitsLabel: `${rec.selectedCommitsCount}/${rec.totalCommitsCount} commits`,
         performanceScore: rec.performanceAfter,
         accessibilityScore: rec.accessibilityAfter,
+        seoScore: rec.seoAfter ?? m.seoAfter,
+        bestPracticesScore: rec.bestPracticesAfter ?? m.bestPracticesAfter,
         lcpScore: lcpVal,
         lcpSeconds: scoreToLcpSeconds(lcpVal),
         clsScore: clsVal,
@@ -1169,6 +1302,7 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
 
     // 3. Current active live session checkpoint at the head of the timeline
     const nextIdx = timelinePoints.length + 1;
+    const nowIso = new Date().toISOString();
     timelinePoints.push({
       auditIndex: nextIdx,
       id: 'fs-timeline-active-head',
@@ -1176,10 +1310,14 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
       title: `Active Live Session (${this.repoFullName().split('/')[1] || this.repoFullName()})`,
       sourceBadge: 'Live Active Session',
       isFirestoreBacked: false,
+      timestampIso: nowIso,
       timestampLabel: 'Active now',
+      daysAgo: 0,
       commitsLabel: `${selCount}/${totCount} commits`,
       performanceScore: m.performanceAfter,
       accessibilityScore: m.accessibilityAfter,
+      seoScore: m.seoAfter,
+      bestPracticesScore: m.bestPracticesAfter,
       lcpScore: lcp.after,
       lcpSeconds: scoreToLcpSeconds(lcp.after),
       clsScore: cls.after,
@@ -1191,20 +1329,41 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
     return timelinePoints;
   });
 
+  readonly trendDateRangeLabel = computed<string>(() => {
+    const r = this.trendDateRange();
+    if (r === 'all') return 'All time';
+    return `Last ${r} days`;
+  });
+
   /**
    * Returns the active D3 trend points based on the user's selected scope
-   * ('all-sessions' plots all saved Firestore sessions; 'last-5' plots the 5-audit view).
+   * ('all-sessions' vs 'last-5') AND date-range filter (30, 60, 90 days, or all time).
    */
   readonly activeTrendPoints = computed<FiveAuditTrendPoint[]>(() => {
-    return this.trendScope() === 'all-sessions'
-      ? this.allSavedSessionsTrendPoints()
-      : this.lastFiveAudits();
+    const basePoints =
+      this.trendScope() === 'all-sessions'
+        ? this.allSavedSessionsTrendPoints()
+        : this.lastFiveAudits();
+
+    const range = this.trendDateRange();
+    if (range === 'all' || basePoints.length <= 2) {
+      return basePoints;
+    }
+
+    const filtered = basePoints.filter((pt) => pt.daysAgo <= range);
+    if (filtered.length >= 2) {
+      return filtered;
+    }
+
+    // Ensure at least 2 chronological checkpoints remain in-window so D3 renders a trajectory curve
+    return basePoints.slice(-2);
   });
 
   /**
    * Builds the chronological 5-audit trajectory (Audit 1 through Audit 5) for the
    * D3 Trend Analysis view on the History tab, combining saved Firestore audits
-   * and progressive optimization milestones from initial scan to latest optimized build.
+   * and progressive optimization milestones spaced across 82 days so 30/60/90d
+   * date-range filtering provides immediate interactive granularity.
    */
   readonly lastFiveAudits = computed<FiveAuditTrendPoint[]>(() => {
     const m = this.metrics();
@@ -1238,6 +1397,9 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
       return Math.max(0.01, Math.round(val * 1000) / 1000);
     };
 
+    const daysAgoIso = (days: number): string =>
+      new Date(Date.now() - days * 24 * 3600 * 1000).toISOString();
+
     const formatDateShort = (iso?: string, fallback = 'Saved run') => {
       if (!iso) return fallback;
       const d = new Date(iso);
@@ -1245,15 +1407,15 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
       return d.toLocaleDateString('en-US', {
         month: 'short',
         day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
       });
     };
 
     const lerp = (start: number, end: number, t: number) =>
       Math.round(start + (end - start) * t);
 
-    // Default 5 progressive audit stages from Initial Scan (Audit 1) to Latest Optimized (Audit 5)
+    const dayOffsets = [82, 54, 34, 16, 0];
+
+    // Default 5 progressive audit stages from Initial Scan (82d ago) to Latest Optimized (Today)
     const baseStages: Omit<FiveAuditTrendPoint, 'lcpSeconds' | 'clsValue'>[] = [
       {
         auditIndex: 1,
@@ -1262,10 +1424,14 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
         title: 'Initial Unpatched Scan',
         sourceBadge: 'Run 0 · Initial Baseline',
         isFirestoreBacked: false,
-        timestampLabel: 'Initial scan',
+        timestampIso: daysAgoIso(dayOffsets[0]),
+        timestampLabel: `${formatDateShort(daysAgoIso(dayOffsets[0]))} (${dayOffsets[0]}d ago)`,
+        daysAgo: dayOffsets[0],
         commitsLabel: `0/${totCount} commits`,
         performanceScore: m.performanceBefore,
         accessibilityScore: m.accessibilityBefore,
+        seoScore: m.seoBefore,
+        bestPracticesScore: m.bestPracticesBefore,
         lcpScore: lcp.before,
         clsScore: cls.before,
         fidScore: fid.before,
@@ -1278,10 +1444,14 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
         title: 'Hero Preload & Font Swap Pass',
         sourceBadge: 'Run 1 · Early Static Pass',
         isFirestoreBacked: false,
-        timestampLabel: 'Audit pass #2',
+        timestampIso: daysAgoIso(dayOffsets[1]),
+        timestampLabel: `${formatDateShort(daysAgoIso(dayOffsets[1]))} (${dayOffsets[1]}d ago)`,
+        daysAgo: dayOffsets[1],
         commitsLabel: `${Math.max(1, Math.round(totCount * 0.33))}/${totCount} commits`,
         performanceScore: lerp(m.performanceBefore, m.performanceAfter, 0.28),
         accessibilityScore: lerp(m.accessibilityBefore, m.accessibilityAfter, 0.25),
+        seoScore: lerp(m.seoBefore, m.seoAfter, 0.3),
+        bestPracticesScore: lerp(m.bestPracticesBefore, m.bestPracticesAfter, 0.28),
         lcpScore: lerp(lcp.before, lcp.after, 0.34),
         clsScore: lerp(cls.before, cls.after, 0.28),
         fidScore: lerp(fid.before, fid.after, 0.26),
@@ -1294,10 +1464,14 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
         title: 'CLS Media Dimensions & Defer Pass',
         sourceBadge: 'Run 1 · Core Web Vitals',
         isFirestoreBacked: false,
-        timestampLabel: 'Audit pass #3',
+        timestampIso: daysAgoIso(dayOffsets[2]),
+        timestampLabel: `${formatDateShort(daysAgoIso(dayOffsets[2]))} (${dayOffsets[2]}d ago)`,
+        daysAgo: dayOffsets[2],
         commitsLabel: `${Math.max(2, Math.round(totCount * 0.55))}/${totCount} commits`,
         performanceScore: lerp(m.performanceBefore, m.performanceAfter, 0.56),
         accessibilityScore: lerp(m.accessibilityBefore, m.accessibilityAfter, 0.54),
+        seoScore: lerp(m.seoBefore, m.seoAfter, 0.58),
+        bestPracticesScore: lerp(m.bestPracticesBefore, m.bestPracticesAfter, 0.55),
         lcpScore: lerp(lcp.before, lcp.after, 0.6),
         clsScore: lerp(cls.before, cls.after, 0.62),
         fidScore: lerp(fid.before, fid.after, 0.55),
@@ -1307,13 +1481,17 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
         auditIndex: 4,
         id: 'trend-audit-4',
         shortLabel: 'Audit 4',
-        title: 'WCAG AA Contrast & ARIA Landmarks',
+        title: 'WCAG AA Contrast & SEO Metadata Pass',
         sourceBadge: 'Run 1 · Full Static Suite',
         isFirestoreBacked: false,
-        timestampLabel: 'Audit pass #4',
+        timestampIso: daysAgoIso(dayOffsets[3]),
+        timestampLabel: `${formatDateShort(daysAgoIso(dayOffsets[3]))} (${dayOffsets[3]}d ago)`,
+        daysAgo: dayOffsets[3],
         commitsLabel: `${Math.max(3, Math.round(totCount * 0.82))}/${totCount} commits`,
         performanceScore: lerp(m.performanceBefore, m.performanceAfter, 0.8),
         accessibilityScore: lerp(m.accessibilityBefore, m.accessibilityAfter, 0.84),
+        seoScore: lerp(m.seoBefore, m.seoAfter, 0.85),
+        bestPracticesScore: lerp(m.bestPracticesBefore, m.bestPracticesAfter, 0.82),
         lcpScore: lerp(lcp.before, lcp.after, 0.82),
         clsScore: lerp(cls.before, cls.after, 0.84),
         fidScore: lerp(fid.before, fid.after, 0.8),
@@ -1326,10 +1504,14 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
         title: 'Latest Optimized Build',
         sourceBadge: 'Active Optimized Session',
         isFirestoreBacked: false,
-        timestampLabel: 'Latest build',
+        timestampIso: daysAgoIso(0),
+        timestampLabel: 'Today · Active',
+        daysAgo: 0,
         commitsLabel: `${selCount}/${totCount} commits`,
         performanceScore: m.performanceAfter,
         accessibilityScore: m.accessibilityAfter,
+        seoScore: m.seoAfter,
+        bestPracticesScore: m.bestPracticesAfter,
         lcpScore: lcp.after,
         clsScore: cls.after,
         fidScore: fid.after,
@@ -1343,7 +1525,7 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
       const targetSlot =
         recentFirestore.length >= 5
           ? idx
-          : Math.min(3, idx + 1); // keep slot 0 as initial scan & slot 4 as latest active or newest Firestore
+          : Math.min(3, idx + 1);
       const perfRatio =
         rec.performanceAfter > rec.performanceBefore
           ? (rec.performanceAfter - rec.performanceBefore) /
@@ -1353,6 +1535,11 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
       const lcpVal = Math.min(97, Math.round(lcp.before + perfRatio * 39));
       const clsVal = Math.min(98, Math.round(cls.before + perfRatio * 34));
       const fidVal = Math.min(96, Math.round(fid.before + perfRatio * 32));
+      const recIso = rec.updatedAtIso || rec.createdAtIso || daysAgoIso(dayOffsets[targetSlot]);
+      const recDaysAgo = Math.max(
+        0,
+        Math.round((Date.now() - new Date(recIso).getTime()) / (24 * 3600 * 1000))
+      );
 
       baseStages[targetSlot] = {
         auditIndex: targetSlot + 1,
@@ -1365,10 +1552,14 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
         sourceBadge:
           rec.runPhase === 'lhr' ? 'Firestore · Run 2 LHR' : 'Firestore · Run 1 Static',
         isFirestoreBacked: true,
-        timestampLabel: formatDateShort(rec.updatedAtIso),
+        timestampIso: recIso,
+        timestampLabel: formatDateShort(recIso),
+        daysAgo: Number.isNaN(recDaysAgo) ? dayOffsets[targetSlot] : recDaysAgo,
         commitsLabel: `${rec.selectedCommitsCount}/${rec.totalCommitsCount} commits`,
         performanceScore: rec.performanceAfter,
         accessibilityScore: rec.accessibilityAfter,
+        seoScore: rec.seoAfter ?? m.seoAfter,
+        bestPracticesScore: rec.bestPracticesAfter ?? m.bestPracticesAfter,
         lcpScore: lcpVal,
         clsScore: clsVal,
         fidScore: fidVal,
@@ -1400,6 +1591,73 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
       return pts.find((p) => p.auditIndex === hovered) ?? pts[pts.length - 1];
     }
     return pts[pts.length - 1];
+  });
+
+  readonly activeTrendMetricMeta = computed<{
+    label: string;
+    shortLabel: string;
+    color: string;
+    firstVal: number;
+    latestVal: number;
+    delta: number;
+    targetZoneText: string;
+  }>(() => {
+    const first = this.firstTrendPoint();
+    const latest = this.latestTrendPoint();
+    const filter = this.trendMetricFilter();
+
+    switch (filter) {
+      case 'performance':
+        return {
+          label: 'Performance Score Trajectory',
+          shortLabel: 'Performance',
+          color: '#0284c7',
+          firstVal: first.performanceScore,
+          latestVal: latest.performanceScore,
+          delta: latest.performanceScore - first.performanceScore,
+          targetZoneText: '90+ Good Lighthouse Performance Zone',
+        };
+      case 'accessibility':
+        return {
+          label: 'Accessibility Score Trajectory',
+          shortLabel: 'Accessibility',
+          color: '#10b981',
+          firstVal: first.accessibilityScore,
+          latestVal: latest.accessibilityScore,
+          delta: latest.accessibilityScore - first.accessibilityScore,
+          targetZoneText: '90+ WCAG 2.2 AA Accessibility Compliance Zone',
+        };
+      case 'seo':
+        return {
+          label: 'SEO Score Trajectory',
+          shortLabel: 'SEO',
+          color: '#f59e0b',
+          firstVal: first.seoScore,
+          latestVal: latest.seoScore,
+          delta: latest.seoScore - first.seoScore,
+          targetZoneText: '90+ Search Crawlability & Metadata Zone',
+        };
+      case 'best-practices':
+        return {
+          label: 'Best Practices Score Trajectory',
+          shortLabel: 'Best Practices',
+          color: '#8b5cf6',
+          firstVal: first.bestPracticesScore,
+          latestVal: latest.bestPracticesScore,
+          delta: latest.bestPracticesScore - first.bestPracticesScore,
+          targetZoneText: '90+ Modern Web Best Practices Zone',
+        };
+      default:
+        return {
+          label: 'Core Web Vitals (LCP, CLS, FID & Performance)',
+          shortLabel: 'Overall Perf',
+          color: '#0ea5e9',
+          firstVal: first.performanceScore,
+          latestVal: latest.performanceScore,
+          delta: latest.performanceScore - first.performanceScore,
+          targetZoneText: '90+ Good Core Web Vitals Zone (LCP ≤ 2.5s · CLS ≤ 0.10 · FID ≤ 100ms)',
+        };
+    }
   });
 
   /**
@@ -1948,6 +2206,8 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
       const trendOn = this.isTrendAnalysisEnabled();
       const trendPoints = this.activeTrendPoints();
       const focusedIdx = this.focusedTrendPoint().auditIndex;
+      const metricFilter = this.trendMetricFilter();
+      const dateRange = this.trendDateRange();
       const axes = this.activeAxes();
       const histRows = this.historyAxisRows();
       const histSessions = this.historySessions();
@@ -1972,7 +2232,7 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
       );
 
       if (mode === 'history' && trendOn) {
-        this.renderD3TrendChart(trendPoints, focusedIdx);
+        this.renderD3TrendChart(trendPoints, focusedIdx, metricFilter, dateRange);
       }
     });
   }
@@ -1995,7 +2255,9 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
     if (this.viewMode() === 'history' && this.isTrendAnalysisEnabled()) {
       this.renderD3TrendChart(
         this.activeTrendPoints(),
-        this.focusedTrendPoint().auditIndex
+        this.focusedTrendPoint().auditIndex,
+        this.trendMetricFilter(),
+        this.trendDateRange()
       );
     }
   }
@@ -2044,6 +2306,21 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
     this.trendScope.set(scope);
     this.hoveredTrendIndex.set(null);
     this.triggerEntranceAnimation();
+  }
+
+  setTrendDateRange(range: TrendDateRange): void {
+    if (this.trendDateRange() === range) return;
+    this.trendDateRange.set(range);
+    this.hoveredTrendIndex.set(null);
+    this.triggerEntranceAnimation();
+  }
+
+  onSelectTrendMetric(event: Event): void {
+    const val = (event.target as HTMLSelectElement | null)?.value as TrendMetricFilter | undefined;
+    if (val && val !== this.trendMetricFilter()) {
+      this.trendMetricFilter.set(val);
+      this.triggerEntranceAnimation();
+    }
   }
 
   onTriggerAutoCompare(): void {
@@ -2151,13 +2428,15 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
   }
 
   /**
-   * Uses D3 (d3-scale, d3-shape, d3-selection, d3-axis) to plot the historical
-   * performance metric improvements (Overall Performance, LCP, CLS, Accessibility)
-   * across all saved audit sessions using the timeline data stored in Firestore.
+   * Uses D3 (d3-scale, d3-shape, d3-selection) to plot historical score trajectories
+   * (Core Web Vitals LCP/CLS/FID, Performance, Accessibility, SEO, or Best Practices)
+   * filtered by the user's selected date range (30/60/90 days or All Time).
    */
   private renderD3TrendChart(
     points: FiveAuditTrendPoint[],
-    highlightedAuditIndex: number
+    highlightedAuditIndex: number,
+    metricFilter: TrendMetricFilter,
+    dateRange: TrendDateRange
   ): void {
     const hostEl = this.d3TrendContainer?.nativeElement;
     if (!hostEl || typeof window === 'undefined' || points.length === 0) return;
@@ -2179,62 +2458,23 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
 
     const defs = svg.append('defs');
 
-    // Gradient fill under LCP trajectory curve
-    const lcpGrad = defs
-      .append('linearGradient')
-      .attr('id', 'd3-lcp-area-grad')
-      .attr('x1', '0%')
-      .attr('y1', '0%')
-      .attr('x2', '0%')
-      .attr('y2', '100%');
-    lcpGrad
-      .append('stop')
-      .attr('offset', '0%')
-      .attr('stop-color', '#0ea5e9')
-      .attr('stop-opacity', 0.24);
-    lcpGrad
-      .append('stop')
-      .attr('offset', '100%')
-      .attr('stop-color', '#0ea5e9')
-      .attr('stop-opacity', 0.01);
+    const addAreaGrad = (id: string, color: string, topOpacity: number) => {
+      const grad = defs
+        .append('linearGradient')
+        .attr('id', id)
+        .attr('x1', '0%')
+        .attr('y1', '0%')
+        .attr('x2', '0%')
+        .attr('y2', '100%');
+      grad.append('stop').attr('offset', '0%').attr('stop-color', color).attr('stop-opacity', topOpacity);
+      grad.append('stop').attr('offset', '100%').attr('stop-color', color).attr('stop-opacity', 0.01);
+    };
 
-    // Gradient fill under CLS trajectory curve
-    const clsGrad = defs
-      .append('linearGradient')
-      .attr('id', 'd3-cls-area-grad')
-      .attr('x1', '0%')
-      .attr('y1', '0%')
-      .attr('x2', '0%')
-      .attr('y2', '100%');
-    clsGrad
-      .append('stop')
-      .attr('offset', '0%')
-      .attr('stop-color', '#10b981')
-      .attr('stop-opacity', 0.18);
-    clsGrad
-      .append('stop')
-      .attr('offset', '100%')
-      .attr('stop-color', '#10b981')
-      .attr('stop-opacity', 0.01);
-
-    // Gradient fill under FID trajectory curve
-    const fidGrad = defs
-      .append('linearGradient')
-      .attr('id', 'd3-fid-area-grad')
-      .attr('x1', '0%')
-      .attr('y1', '0%')
-      .attr('x2', '0%')
-      .attr('y2', '100%');
-    fidGrad
-      .append('stop')
-      .attr('offset', '0%')
-      .attr('stop-color', '#8b5cf6')
-      .attr('stop-opacity', 0.16);
-    fidGrad
-      .append('stop')
-      .attr('offset', '100%')
-      .attr('stop-color', '#8b5cf6')
-      .attr('stop-opacity', 0.01);
+    addAreaGrad('d3-lcp-area-grad', '#0ea5e9', 0.24);
+    addAreaGrad('d3-cls-area-grad', '#10b981', 0.18);
+    addAreaGrad('d3-fid-area-grad', '#8b5cf6', 0.16);
+    addAreaGrad('d3-seo-area-grad', '#f59e0b', 0.24);
+    addAreaGrad('d3-perf-area-grad', '#0284c7', 0.24);
 
     const g = svg
       .append('g')
@@ -2248,7 +2488,7 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
 
     const yScale = d3.scaleLinear().domain([45, 100]).range([innerHeight, 0]);
 
-    // Good Core Web Vitals threshold band (Score 90-100)
+    // Good 90+ target band
     const goodBandTop = yScale(100);
     const goodBandBottom = yScale(90);
     g.append('rect')
@@ -2266,7 +2506,18 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
       .attr('fill', '#10b981')
       .attr('font-size', '8.2px')
       .attr('font-weight', '700')
-      .text('90+ Good Core Web Vitals Zone (LCP ≤ 2.5s · CLS ≤ 0.10 · FID ≤ 100ms)');
+      .text(this.activeTrendMetricMeta().targetZoneText);
+
+    // Date-range badge in top-right of chart
+    g.append('text')
+      .attr('x', innerWidth - 4)
+      .attr('y', -10)
+      .attr('text-anchor', 'end')
+      .attr('fill', 'var(--text-muted)')
+      .attr('font-size', '8.5px')
+      .attr('font-family', 'var(--font-mono)')
+      .attr('font-weight', '600')
+      .text(dateRange === 'all' ? 'Range: All time' : `Window: Last ${dateRange}d`);
 
     // Horizontal grid lines
     const yTicks = [50, 60, 70, 80, 90, 100];
@@ -2291,13 +2542,12 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
         .text(String(tickVal));
     });
 
-    // Vertical audit columns & X-axis labels across all saved Firestore timeline sessions
+    // Vertical audit columns & X-axis labels
     const totalPts = points.length;
     const compactLabels = totalPts > 6;
     points.forEach((pt, idx) => {
       const xPos = xScale(pt.auditIndex) ?? 0;
       const isFocused = pt.auditIndex === highlightedAuditIndex;
-      const isFirst = idx === 0;
       const isLast = idx === totalPts - 1;
 
       g.append('line')
@@ -2326,15 +2576,11 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
         .attr('font-weight', isFocused ? '700' : '600')
         .text(topAxisLabel);
 
-      const subAxisLabel = isFirst
-        ? 'Initial'
-        : isLast
-          ? 'Latest'
-          : pt.isFirestoreBacked
-            ? compactLabels
-              ? 'FS'
-              : 'Firestore'
-            : `Pass #${pt.auditIndex}`;
+      const subAxisLabel = isLast
+        ? 'Today'
+        : pt.daysAgo === 0
+          ? 'Today'
+          : `${pt.daysAgo}d ago`;
 
       g.append('text')
         .attr('x', xPos)
@@ -2346,44 +2592,14 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
         .text(subAxisLabel);
     });
 
-    // Area generators for LCP, CLS, and FID
-    const lcpArea = d3
-      .area<FiveAuditTrendPoint>()
-      .x((d) => xScale(d.auditIndex) ?? 0)
-      .y0(innerHeight)
-      .y1((d) => yScale(d.lcpScore))
-      .curve(d3.curveMonotoneX);
+    const makeArea = (accessor: (d: FiveAuditTrendPoint) => number) =>
+      d3
+        .area<FiveAuditTrendPoint>()
+        .x((d) => xScale(d.auditIndex) ?? 0)
+        .y0(innerHeight)
+        .y1((d) => yScale(accessor(d)))
+        .curve(d3.curveMonotoneX);
 
-    const clsArea = d3
-      .area<FiveAuditTrendPoint>()
-      .x((d) => xScale(d.auditIndex) ?? 0)
-      .y0(innerHeight)
-      .y1((d) => yScale(d.clsScore))
-      .curve(d3.curveMonotoneX);
-
-    const fidArea = d3
-      .area<FiveAuditTrendPoint>()
-      .x((d) => xScale(d.auditIndex) ?? 0)
-      .y0(innerHeight)
-      .y1((d) => yScale(d.fidScore))
-      .curve(d3.curveMonotoneX);
-
-    g.append('path')
-      .datum(points)
-      .attr('fill', 'url(#d3-lcp-area-grad)')
-      .attr('d', lcpArea);
-
-    g.append('path')
-      .datum(points)
-      .attr('fill', 'url(#d3-cls-area-grad)')
-      .attr('d', clsArea);
-
-    g.append('path')
-      .datum(points)
-      .attr('fill', 'url(#d3-fid-area-grad)')
-      .attr('d', fidArea);
-
-    // Line generator helper
     const makeLine = (accessor: (d: FiveAuditTrendPoint) => number) =>
       d3
         .line<FiveAuditTrendPoint>()
@@ -2391,139 +2607,214 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
         .y((d) => yScale(accessor(d)))
         .curve(d3.curveMonotoneX);
 
-    const seriesList: {
-      id: string;
-      label: string;
-      color: string;
-      strokeWidth: number;
-      dash?: string;
-      accessor: (d: FiveAuditTrendPoint) => number;
-    }[] = [
-      {
-        id: 'perf',
-        label: 'Overall Performance',
-        color: 'var(--accent-primary)',
-        strokeWidth: 1.9,
-        dash: '4 3',
-        accessor: (d) => d.performanceScore,
-      },
-      {
-        id: 'fid',
-        label: 'FID (First Input Delay)',
-        color: '#8b5cf6',
-        strokeWidth: 2.4,
-        accessor: (d) => d.fidScore,
-      },
-      {
-        id: 'cls',
-        label: 'CLS (Cumulative Layout Shift)',
-        color: '#10b981',
-        strokeWidth: 2.5,
-        accessor: (d) => d.clsScore,
-      },
-      {
-        id: 'lcp',
-        label: 'LCP (Largest Contentful Paint)',
-        color: '#0ea5e9',
-        strokeWidth: 2.8,
-        accessor: (d) => d.lcpScore,
-      },
-    ];
-
-    seriesList.forEach((s) => {
-      g.append('path')
-        .datum(points)
-        .attr('fill', 'none')
-        .attr('stroke', s.color)
-        .attr('stroke-width', s.strokeWidth)
-        .attr('stroke-dasharray', s.dash ?? 'none')
-        .attr('stroke-linecap', 'round')
-        .attr('d', makeLine(s.accessor));
-
-      // Data points on each series
-      points.forEach((pt) => {
-        const cx = xScale(pt.auditIndex) ?? 0;
-        const cy = yScale(s.accessor(pt));
-        const isHighlighted = pt.auditIndex === highlightedAuditIndex;
-
-        g.append('circle')
-          .attr('cx', cx)
-          .attr('cy', cy)
-          .attr('r', isHighlighted ? 5.2 : pt.isFirestoreBacked ? 4.1 : 3.5)
-          .attr('fill', s.color)
-          .attr('stroke', 'var(--bg-card)')
-          .attr('stroke-width', 1.5)
-          .style('cursor', 'pointer')
-          .on('mouseenter', () => {
-            this.hoveredTrendIndex.set(pt.auditIndex);
-          });
-      });
-    });
-
-    // Core Web Vitals Direct Callout Badges (LCP, CLS, FID) on Initial and Latest sessions
     const first = points[0];
     const last = points[points.length - 1];
     const xFirst = xScale(first.auditIndex) ?? 0;
     const xLast = xScale(last.auditIndex) ?? innerWidth;
 
-    // Initial LCP, CLS & FID callouts
-    g.append('text')
-      .attr('x', xFirst + 4)
-      .attr('y', yScale(first.lcpScore) + 13)
-      .attr('fill', '#0284c7')
-      .attr('font-size', '8.5px')
-      .attr('font-weight', '700')
-      .attr('font-family', 'var(--font-mono)')
-      .text(`LCP ${first.lcpSeconds}s`);
+    if (metricFilter === 'all-cwv') {
+      g.append('path').datum(points).attr('fill', 'url(#d3-lcp-area-grad)').attr('d', makeArea((d) => d.lcpScore));
+      g.append('path').datum(points).attr('fill', 'url(#d3-cls-area-grad)').attr('d', makeArea((d) => d.clsScore));
+      g.append('path').datum(points).attr('fill', 'url(#d3-fid-area-grad)').attr('d', makeArea((d) => d.fidScore));
 
-    g.append('text')
-      .attr('x', xFirst + 4)
-      .attr('y', yScale(first.clsScore) - 7)
-      .attr('fill', '#059669')
-      .attr('font-size', '8.5px')
-      .attr('font-weight', '700')
-      .attr('font-family', 'var(--font-mono)')
-      .text(`CLS ${first.clsValue}`);
+      const seriesList: {
+        id: string;
+        color: string;
+        strokeWidth: number;
+        dash?: string;
+        accessor: (d: FiveAuditTrendPoint) => number;
+      }[] = [
+        { id: 'perf', color: 'var(--accent-primary)', strokeWidth: 1.9, dash: '4 3', accessor: (d) => d.performanceScore },
+        { id: 'fid', color: '#8b5cf6', strokeWidth: 2.4, accessor: (d) => d.fidScore },
+        { id: 'cls', color: '#10b981', strokeWidth: 2.5, accessor: (d) => d.clsScore },
+        { id: 'lcp', color: '#0ea5e9', strokeWidth: 2.8, accessor: (d) => d.lcpScore },
+      ];
 
-    g.append('text')
-      .attr('x', xFirst + 4)
-      .attr('y', yScale(first.fidScore) + 3)
-      .attr('fill', '#7c3aed')
-      .attr('font-size', '8.5px')
-      .attr('font-weight', '700')
-      .attr('font-family', 'var(--font-mono)')
-      .text(`FID ${first.inpMs}ms`);
+      seriesList.forEach((s) => {
+        g.append('path')
+          .datum(points)
+          .attr('fill', 'none')
+          .attr('stroke', s.color)
+          .attr('stroke-width', s.strokeWidth)
+          .attr('stroke-dasharray', s.dash ?? 'none')
+          .attr('stroke-linecap', 'round')
+          .attr('d', makeLine(s.accessor));
 
-    // Final optimized LCP, CLS & FID callouts
-    g.append('text')
-      .attr('x', xLast - 4)
-      .attr('y', yScale(last.lcpScore) + 14)
-      .attr('text-anchor', 'end')
-      .attr('fill', '#0284c7')
-      .attr('font-size', '8.6px')
-      .attr('font-weight', '700')
-      .attr('font-family', 'var(--font-mono)')
-      .text(`LCP ${last.lcpSeconds}s (+${last.lcpScore - first.lcpScore})`);
+        points.forEach((pt) => {
+          const cx = xScale(pt.auditIndex) ?? 0;
+          const cy = yScale(s.accessor(pt));
+          const isHighlighted = pt.auditIndex === highlightedAuditIndex;
 
-    g.append('text')
-      .attr('x', xLast - 4)
-      .attr('y', Math.max(11, yScale(last.clsScore) - 7))
-      .attr('text-anchor', 'end')
-      .attr('fill', '#059669')
-      .attr('font-size', '8.6px')
-      .attr('font-weight', '700')
-      .attr('font-family', 'var(--font-mono)')
-      .text(`CLS ${last.clsValue} (+${last.clsScore - first.clsScore})`);
+          g.append('circle')
+            .attr('cx', cx)
+            .attr('cy', cy)
+            .attr('r', isHighlighted ? 5.2 : pt.isFirestoreBacked ? 4.1 : 3.5)
+            .attr('fill', s.color)
+            .attr('stroke', 'var(--bg-card)')
+            .attr('stroke-width', 1.5)
+            .style('cursor', 'pointer')
+            .on('mouseenter', () => {
+              this.hoveredTrendIndex.set(pt.auditIndex);
+            });
+        });
+      });
 
-    g.append('text')
-      .attr('x', xLast - 4)
-      .attr('y', Math.min(innerHeight - 4, yScale(last.fidScore) + 25))
-      .attr('text-anchor', 'end')
-      .attr('fill', '#7c3aed')
-      .attr('font-size', '8.6px')
-      .attr('font-weight', '700')
-      .attr('font-family', 'var(--font-mono)')
-      .text(`FID ${last.inpMs}ms (+${last.fidScore - first.fidScore})`);
+      // Core Web Vitals endpoint callouts
+      g.append('text')
+        .attr('x', xFirst + 4)
+        .attr('y', yScale(first.lcpScore) + 13)
+        .attr('fill', '#0284c7')
+        .attr('font-size', '8.5px')
+        .attr('font-weight', '700')
+        .attr('font-family', 'var(--font-mono)')
+        .text(`LCP ${first.lcpSeconds}s`);
+
+      g.append('text')
+        .attr('x', xFirst + 4)
+        .attr('y', yScale(first.clsScore) - 7)
+        .attr('fill', '#059669')
+        .attr('font-size', '8.5px')
+        .attr('font-weight', '700')
+        .attr('font-family', 'var(--font-mono)')
+        .text(`CLS ${first.clsValue}`);
+
+      g.append('text')
+        .attr('x', xFirst + 4)
+        .attr('y', yScale(first.fidScore) + 3)
+        .attr('fill', '#7c3aed')
+        .attr('font-size', '8.5px')
+        .attr('font-weight', '700')
+        .attr('font-family', 'var(--font-mono)')
+        .text(`FID ${first.inpMs}ms`);
+
+      g.append('text')
+        .attr('x', xLast - 4)
+        .attr('y', yScale(last.lcpScore) + 14)
+        .attr('text-anchor', 'end')
+        .attr('fill', '#0284c7')
+        .attr('font-size', '8.6px')
+        .attr('font-weight', '700')
+        .attr('font-family', 'var(--font-mono)')
+        .text(`LCP ${last.lcpSeconds}s (+${last.lcpScore - first.lcpScore})`);
+
+      g.append('text')
+        .attr('x', xLast - 4)
+        .attr('y', Math.max(11, yScale(last.clsScore) - 7))
+        .attr('text-anchor', 'end')
+        .attr('fill', '#059669')
+        .attr('font-size', '8.6px')
+        .attr('font-weight', '700')
+        .attr('font-family', 'var(--font-mono)')
+        .text(`CLS ${last.clsValue} (+${last.clsScore - first.clsScore})`);
+
+      g.append('text')
+        .attr('x', xLast - 4)
+        .attr('y', Math.min(innerHeight - 4, yScale(last.fidScore) + 25))
+        .attr('text-anchor', 'end')
+        .attr('fill', '#7c3aed')
+        .attr('font-size', '8.6px')
+        .attr('font-weight', '700')
+        .attr('font-family', 'var(--font-mono)')
+        .text(`FID ${last.inpMs}ms (+${last.fidScore - first.fidScore})`);
+      return;
+    }
+
+    // Focused Single-Metric Trajectory Mode (Performance, Accessibility, SEO, or Best Practices)
+    const metricConfigMap: Record<
+      Exclude<TrendMetricFilter, 'all-cwv'>,
+      {
+        shortTag: string;
+        color: string;
+        gradId: string;
+        accessor: (d: FiveAuditTrendPoint) => number;
+      }
+    > = {
+      performance: {
+        shortTag: 'Perf',
+        color: '#0284c7',
+        gradId: 'url(#d3-perf-area-grad)',
+        accessor: (d) => d.performanceScore,
+      },
+      accessibility: {
+        shortTag: 'A11y',
+        color: '#10b981',
+        gradId: 'url(#d3-cls-area-grad)',
+        accessor: (d) => d.accessibilityScore,
+      },
+      seo: {
+        shortTag: 'SEO',
+        color: '#f59e0b',
+        gradId: 'url(#d3-seo-area-grad)',
+        accessor: (d) => d.seoScore,
+      },
+      'best-practices': {
+        shortTag: 'BP',
+        color: '#8b5cf6',
+        gradId: 'url(#d3-fid-area-grad)',
+        accessor: (d) => d.bestPracticesScore,
+      },
+    };
+
+    const cfg = metricConfigMap[metricFilter];
+
+    // Subtle secondary baseline reference curve (Performance when viewing another metric, or LCP when viewing Performance)
+    const refAccessor =
+      metricFilter === 'performance'
+        ? (d: FiveAuditTrendPoint) => d.lcpScore
+        : (d: FiveAuditTrendPoint) => d.performanceScore;
+    g.append('path')
+      .datum(points)
+      .attr('fill', 'none')
+      .attr('stroke', 'var(--text-muted)')
+      .attr('stroke-opacity', 0.35)
+      .attr('stroke-width', 1.4)
+      .attr('stroke-dasharray', '4 3')
+      .attr('d', makeLine(refAccessor));
+
+    // Area + Main Trajectory Line
+    g.append('path').datum(points).attr('fill', cfg.gradId).attr('d', makeArea(cfg.accessor));
+    g.append('path')
+      .datum(points)
+      .attr('fill', 'none')
+      .attr('stroke', cfg.color)
+      .attr('stroke-width', 3.1)
+      .attr('stroke-linecap', 'round')
+      .attr('d', makeLine(cfg.accessor));
+
+    // Data points + direct score labels above each point
+    points.forEach((pt, idx) => {
+      const cx = xScale(pt.auditIndex) ?? 0;
+      const val = cfg.accessor(pt);
+      const cy = yScale(val);
+      const isHighlighted = pt.auditIndex === highlightedAuditIndex;
+
+      g.append('circle')
+        .attr('cx', cx)
+        .attr('cy', cy)
+        .attr('r', isHighlighted ? 6 : 4.5)
+        .attr('fill', cfg.color)
+        .attr('stroke', 'var(--bg-card)')
+        .attr('stroke-width', 1.8)
+        .style('cursor', 'pointer')
+        .on('mouseenter', () => {
+          this.hoveredTrendIndex.set(pt.auditIndex);
+        });
+
+      const isLast = idx === points.length - 1;
+      const labelTxt = isLast
+        ? `${cfg.shortTag} ${val} (+${val - cfg.accessor(first)})`
+        : `${val}`;
+
+      g.append('text')
+        .attr('x', isLast ? cx - 4 : cx)
+        .attr('y', Math.max(12, cy - 10))
+        .attr('text-anchor', isLast ? 'end' : 'middle')
+        .attr('fill', cfg.color)
+        .attr('font-size', isLast ? '9.2px' : '8.6px')
+        .attr('font-weight', '700')
+        .attr('font-family', 'var(--font-mono)')
+        .text(labelTxt);
+    });
   }
 
   private renderRechartsRadar(

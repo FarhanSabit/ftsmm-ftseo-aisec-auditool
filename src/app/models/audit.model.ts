@@ -248,4 +248,34 @@ export interface GitHubRepoRealtimeStats {
   source: 'github-live' | 'sandbox-live' | 'github-fallback';
 }
 
+export interface GitHubRepoIssueLabel {
+  name: string;
+  color: string;
+  description?: string;
+}
 
+export interface GitHubRepoIssue {
+  id: number;
+  number: number;
+  title: string;
+  state: 'open';
+  htmlUrl: string;
+  authorLogin: string;
+  authorAvatarUrl?: string;
+  createdAt: string;
+  updatedAt: string;
+  commentsCount: number;
+  bodyExcerpt: string;
+  labels: GitHubRepoIssueLabel[];
+  relatedCategory: Exclude<LighthouseCategory, 'all'>;
+  matchedCommitRule?: string;
+}
+
+export interface GitHubRepoIssuesResponse {
+  fullName: string;
+  owner: string;
+  repo: string;
+  openIssuesTotal: number;
+  source: 'github-api' | 'sandbox-live' | 'github-fallback';
+  issues: GitHubRepoIssue[];
+}

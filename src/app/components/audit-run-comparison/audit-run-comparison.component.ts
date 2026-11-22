@@ -29,6 +29,7 @@ import {
   AuditSession,
   SavedAuditHistoryRecord,
 } from '../../models/audit.model';
+import { buildRadarComparisonDeltaPdf } from '../../utils/comparison-pdf.util';
 
 export interface ComparableAuditRun {
   id: string;
@@ -126,6 +127,25 @@ export interface MetricComparisonRow {
           @if (isExpanded()) {
             <button
               type="button"
+              id="download-comparison-pdf-btn"
+              class="export-pill-btn export-pill-btn--pdf-compare"
+              [disabled]="!runA() || !runB() || isDownloadingComparisonPdf()"
+              (click)="downloadComparisonPdf()"
+              title="Generate and download a single-page vector PDF showing the radar chart delta between Audit Run A and Audit Run B"
+            >
+              <span class="file-type-indicator file-type-indicator--pdf" aria-hidden="true">
+                <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6">
+                  <path d="M4.2 2.5h6.4l3.2 3.2v9.8a1 1 0 0 1-1 1H4.2a1 1 0 0 1-1-1v-12a1 1 0 0 1 1-1z" stroke-linejoin="round" />
+                  <path d="M10.5 2.5v3.3h3.3" stroke-linejoin="round" />
+                  <path d="M5.8 11.2h6.4M5.8 13.5h4.2" stroke-linecap="round" />
+                </svg>
+                <span class="file-type-indicator__ext">.PDF</span>
+              </span>
+              <span>{{ isDownloadingComparisonPdf() ? 'Generating Comparison PDF...' : 'Download Comparison PDF' }}</span>
+            </button>
+
+            <button
+              type="button"
               class="export-pill-btn"
               (click)="swapRuns()"
               title="Swap Audit Run A and Audit Run B"
@@ -156,6 +176,22 @@ export interface MetricComparisonRow {
 
       @if (isExpanded()) {
         <div id="run-compare-panel-body" class="run-compare-body">
+          @if (comparisonPdfNotice(); as pdfNote) {
+            <div class="auto-compare-banner comparison-pdf-banner" role="status" aria-live="polite">
+              <div class="auto-compare-banner__main">
+                <span class="file-type-indicator file-type-indicator--pdf">.PDF</span>
+                <span class="auto-compare-banner__text">{{ pdfNote }}</span>
+              </div>
+              <button
+                type="button"
+                class="text-action-btn"
+                (click)="dismissComparisonPdfNotice()"
+              >
+                Dismiss
+              </button>
+            </div>
+          }
+
           @if (autoCompareNotice(); as notice) {
             <div class="auto-compare-banner" role="status" aria-live="polite">
               <div class="auto-compare-banner__main">
@@ -586,6 +622,8 @@ export class AuditRunComparisonComponent implements AfterViewInit, OnDestroy {
   readonly selectedRunBId = signal<string>('');
   readonly isAutoComparedActive = signal<boolean>(false);
   readonly autoCompareNotice = signal<string | null>(null);
+  readonly isDownloadingComparisonPdf = signal<boolean>(false);
+  readonly comparisonPdfNotice = signal<string | null>(null);
 
   /**
    * Builds the list of selectable audit runs combining:
@@ -1138,6 +1176,43 @@ export class AuditRunComparisonComponent implements AfterViewInit, OnDestroy {
 
   dismissAutoCompareNotice(): void {
     this.autoCompareNotice.set(null);
+  }
+
+  dismissComparisonPdfNotice(): void {
+    this.comparisonPdfNotice.set(null);
+  }
+
+  /**
+   * Generates and triggers download of a single-page vector PDF showing the
+   * radar chart delta and full 8-dimension metric breakdown between Run A and Run B.
+   */
+  downloadComparisonPdf(): void {
+    const a = this.runA();
+    const b = this.runB();
+    const rows = this.comparisonRows();
+    if (!a || !b || typeof document === 'undefined') return;
+
+    this.isDownloadingComparisonPdf.set(true);
+    try {
+      const payload = buildRadarComparisonDeltaPdf(a, b, rows);
+      const blob = new Blob([payload.bytes], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = payload.filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
+
+      const perfDiff = b.performanceAfter - a.performanceAfter;
+      const a11yDiff = b.accessibilityAfter - a.accessibilityAfter;
+      this.comparisonPdfNotice.set(
+        `Downloaded ${payload.filename} with vector Radar Chart Delta overlay (${a.badge} vs. ${b.badge}: Perf ${perfDiff >= 0 ? '+' : ''}${perfDiff} pts, A11y ${a11yDiff >= 0 ? '+' : ''}${a11yDiff} pts).`
+      );
+    } finally {
+      this.isDownloadingComparisonPdf.set(false);
+    }
   }
 
   onSelectRunA(runId: string): void {

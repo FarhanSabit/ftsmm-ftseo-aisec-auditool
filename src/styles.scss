@@ -988,10 +988,13 @@ samp {
   border: 1.5px solid var(--border-card);
   border-radius: 24px;
   padding: 1.35rem 1.5rem;
-  will-change: transform, opacity;
+  transform-origin: center center;
+  will-change: transform, scale, opacity;
   transition:
+    transform 240ms cubic-bezier(0.22, 1, 0.36, 1),
+    scale 240ms cubic-bezier(0.22, 1, 0.36, 1),
     border-color 220ms var(--ease-flow),
-    box-shadow 220ms var(--ease-flow),
+    box-shadow 240ms cubic-bezier(0.22, 1, 0.36, 1),
     opacity 220ms var(--ease-flow);
 }
 
@@ -1014,6 +1017,20 @@ samp {
 
 .commit-card:hover {
   border-color: var(--text-muted);
+  transform: translateY(-2px) scale(1.015);
+  scale: 1.015;
+  box-shadow: 0 12px 28px -10px rgba(15, 23, 42, 0.14);
+}
+
+[data-theme="dark"] .commit-card:hover {
+  box-shadow: 0 14px 32px -10px rgba(2, 6, 23, 0.48);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .commit-card:hover {
+    transform: none;
+    scale: 1;
+  }
 }
 
 .commit-card.is-unchecked {
@@ -4952,4 +4969,411 @@ a.repo-stat-chip:hover {
 [data-theme="dark"] .d3-significance-pill--firestore {
   color: #c4b5fd;
 }
+
+/* ==========================================================================
+   GITHUB OPEN ISSUES TAB & PANEL IN REPORT PAGE
+   ========================================================================== */
+.cat-pill--issues.is-active {
+  background: var(--accent-soft);
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+}
+
+[data-theme="dark"] .cat-pill--issues.is-active {
+  color: var(--accent-cyan);
+}
+
+.github-issues-panel {
+  width: 100%;
+  margin-top: 1.05rem;
+  margin-bottom: 1.35rem;
+  padding: 1.35rem 1.5rem;
+  border-radius: 24px;
+  background: var(--bg-subtle);
+  border: 1.5px solid var(--border-card);
+  text-align: left;
+  animation: fadeSlideUp 240ms var(--ease-flow);
+}
+
+.github-issues-panel__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.github-issues-panel__eyebrow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.github-issues-source-pill {
+  padding: 0.22rem 0.65rem;
+  border-radius: 999px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-card);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.github-issues-panel__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.github-issues-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.42rem;
+  padding-bottom: 0.95rem;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid var(--border-hairline);
+}
+
+.github-issues-filter-chip {
+  padding: 0.34rem 0.78rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-card);
+  background: var(--bg-card);
+  color: var(--text-muted);
+  font-family: var(--font-sans);
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 160ms var(--ease-flow);
+}
+
+.github-issues-filter-chip:hover {
+  border-color: var(--text-muted);
+  color: var(--text-main);
+}
+
+.github-issues-filter-chip.is-active {
+  background: var(--accent-soft);
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+}
+
+[data-theme="dark"] .github-issues-filter-chip.is-active {
+  color: var(--accent-cyan);
+}
+
+.github-issues-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(310px, 1fr));
+  gap: 0.9rem;
+}
+
+.github-issue-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 0.65rem;
+  padding: 1.15rem 1.25rem;
+  border-radius: 20px;
+  background: var(--bg-card);
+  border: 1.5px solid var(--border-card);
+  transition:
+    transform 200ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 180ms var(--ease-flow),
+    box-shadow 200ms var(--ease-flow);
+}
+
+.github-issue-card:hover {
+  border-color: var(--accent-primary);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-soft);
+}
+
+.github-issue-card__top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.github-issue-card__badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.github-issue-state-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.18rem 0.58rem;
+  border-radius: 999px;
+  background: rgba(16, 185, 129, 0.14);
+  border: 1px solid rgba(16, 185, 129, 0.38);
+  color: #059669;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+[data-theme="dark"] .github-issue-state-badge {
+  color: #34d399;
+}
+
+.github-issue-state-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.github-issue-cat-pill {
+  padding: 0.16rem 0.55rem;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  border: 1px solid rgba(2, 132, 199, 0.28);
+  color: var(--accent-primary);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+[data-theme="dark"] .github-issue-cat-pill {
+  color: var(--accent-cyan);
+}
+
+.github-issue-card__meta {
+  font-family: var(--font-mono);
+  font-size: 0.71rem;
+  color: var(--text-muted);
+}
+
+.github-issue-card__title {
+  margin: 0;
+  font-size: 0.96rem;
+  font-weight: 700;
+  line-height: 1.42;
+  color: var(--text-main);
+}
+
+.github-issue-card__title a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.github-issue-card__title a:hover {
+  color: var(--accent-primary);
+  text-decoration: underline;
+}
+
+[data-theme="dark"] .github-issue-card__title a:hover {
+  color: var(--accent-cyan);
+}
+
+.github-issue-card__excerpt {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--text-body);
+}
+
+.github-issue-card__labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.38rem;
+}
+
+.github-issue-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.32rem;
+  padding: 0.16rem 0.55rem;
+  border-radius: 999px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-card);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.github-issue-label__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--gh-label-color, var(--accent-primary));
+  flex-shrink: 0;
+}
+
+.github-issue-card__footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.55rem;
+  padding-top: 0.55rem;
+  border-top: 1px dashed var(--border-hairline);
+}
+
+.github-issue-commit-link {
+  padding: 0.25rem 0.65rem;
+  border-radius: 10px;
+  border: 1px solid var(--border-card);
+  background: var(--bg-subtle);
+  color: var(--accent-primary);
+  font-family: var(--font-sans);
+  font-size: 0.76rem;
+  font-weight: 700;
+  cursor: pointer;
+  text-align: left;
+  transition: all 160ms var(--ease-flow);
+}
+
+.github-issue-commit-link:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent-primary);
+}
+
+[data-theme="dark"] .github-issue-commit-link {
+  color: var(--accent-cyan);
+}
+
+.github-issue-commit-link code {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+}
+
+.github-issue-ext-link {
+  font-family: var(--font-mono);
+  font-size: 0.73rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.github-issue-ext-link:hover {
+  color: var(--accent-primary);
+  text-decoration: underline;
+}
+
+[data-theme="dark"] .github-issue-ext-link:hover {
+  color: var(--accent-cyan);
+}
+
+/* ==========================================================================
+   TREND ANALYSIS DATE-RANGE & METRIC TRAJECTORY FILTER BAR + COMPARISON PDF
+   ========================================================================== */
+.d3-trend-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
+  padding: 0.72rem 1rem;
+  margin-bottom: 1.05rem;
+  border-radius: 18px;
+  background: var(--bg-card);
+  border: 1.5px solid var(--border-card);
+}
+
+.d3-trend-filter-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.d3-trend-filter-label {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+}
+
+.d3-trend-metric-select {
+  padding: 0.4rem 0.85rem;
+  border-radius: 999px;
+  border: 1.5px solid var(--border-card);
+  background: var(--bg-subtle);
+  color: var(--text-main);
+  font-family: var(--font-sans);
+  font-size: 0.79rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 180ms var(--ease-flow), box-shadow 180ms var(--ease-flow);
+}
+
+.d3-trend-metric-select:hover {
+  border-color: var(--accent-primary);
+}
+
+.d3-trend-metric-select:focus-visible {
+  outline: none;
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.d3-trend-filter-summary {
+  padding: 0.24rem 0.68rem;
+  border-radius: 999px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-hairline);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-body);
+}
+
+.d3-cwv-chip--seo {
+  background: rgba(245, 158, 11, 0.13);
+  border-color: rgba(245, 158, 11, 0.36);
+  color: #b45309;
+}
+
+[data-theme="dark"] .d3-cwv-chip--seo {
+  color: #fbbf24;
+}
+
+.d3-cwv-chip.is-metric-focused {
+  box-shadow: 0 0 0 2px var(--accent-primary);
+  font-weight: 700;
+}
+
+.export-pill-btn--pdf-compare {
+  border-color: rgba(225, 29, 72, 0.36);
+  background: var(--bg-card);
+}
+
+.export-pill-btn--pdf-compare:hover:not(:disabled) {
+  border-color: #e11d48;
+  background: rgba(225, 29, 72, 0.08);
+}
+
+[data-theme="dark"] .export-pill-btn--pdf-compare {
+  border-color: rgba(251, 113, 133, 0.4);
+}
+
+[data-theme="dark"] .export-pill-btn--pdf-compare:hover:not(:disabled) {
+  border-color: #fb7185;
+  background: rgba(251, 113, 133, 0.14);
+}
+
+.comparison-pdf-banner {
+  border-color: rgba(225, 29, 72, 0.35);
+}
+
+
 
