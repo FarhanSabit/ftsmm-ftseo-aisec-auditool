@@ -5,6 +5,7 @@ import { FirebaseAuthService } from './services/firebase-auth.service';
 import { FresnelLogoComponent } from './components/fresnel-logo/fresnel-logo.component';
 import { ImpactRadarChartComponent } from './components/impact-radar-chart/impact-radar-chart.component';
 import { RepoContextBarComponent } from './components/repo-context-bar/repo-context-bar.component';
+import { AuditRunComparisonComponent } from './components/audit-run-comparison/audit-run-comparison.component';
 import { LighthouseCategory, SavedAuditHistoryRecord } from './models/audit.model';
 
 export interface CategoryTabItem {
@@ -16,7 +17,13 @@ export interface CategoryTabItem {
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [FormsModule, FresnelLogoComponent, ImpactRadarChartComponent, RepoContextBarComponent],
+  imports: [
+    FormsModule,
+    FresnelLogoComponent,
+    ImpactRadarChartComponent,
+    RepoContextBarComponent,
+    AuditRunComparisonComponent
+  ],
   templateUrl: './app.component.html',
   styleUrl: './app.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush
@@ -26,6 +33,10 @@ export class AppComponent {
   readonly fbAuth = inject(FirebaseAuthService);
   readonly repoUrl = signal<string>('');
   readonly copiedKey = signal<string | null>(null);
+  readonly isComparisonPanelOpen = signal<boolean>(true);
+  readonly reportListAnimCycle = signal<number>(1);
+  readonly isReportListEntering = signal<boolean>(true);
+  private reportListAnimTimer: ReturnType<typeof setTimeout> | null = null;
 
   readonly allCategories: CategoryTabItem[] = [
     { key: 'all', label: 'All' },
@@ -88,6 +99,30 @@ export class AppComponent {
       : pr.shortTerminalCommand ?? '';
   });
 
+  onSelectCategoryFilter(category: LighthouseCategory): void {
+    this.audit.categoryFilter.set(category);
+    this.triggerReportListStagger();
+  }
+
+  toggleComparisonPanel(): void {
+    this.isComparisonPanelOpen.update((v) => !v);
+  }
+
+  triggerReportListStagger(): void {
+    if (this.reportListAnimTimer) {
+      clearTimeout(this.reportListAnimTimer);
+      this.reportListAnimTimer = null;
+    }
+    this.isReportListEntering.set(false);
+    this.reportListAnimCycle.update((n) => n + 1);
+    setTimeout(() => {
+      this.isReportListEntering.set(true);
+      this.reportListAnimTimer = setTimeout(() => {
+        this.isReportListEntering.set(false);
+      }, 850);
+    }, 12);
+  }
+
   async onStartLiveAudit(): Promise<void> {
     const url =
       this.repoUrl().trim() || 'https://github.com/fresnel-sandbox/lumina-web-app';
@@ -137,8 +172,10 @@ export class AppComponent {
 
   async onOpenSavedAudit(record: SavedAuditHistoryRecord): Promise<void> {
     this.fbAuth.isHistoryDrawerOpen.set(false);
+    this.fbAuth.closeHistoryModal();
+    this.fbAuth.setView4SubView('pr');
     this.repoUrl.set(record.repoUrl);
-    await this.audit.startAudit(record.repoUrl, record.mode);
+    await this.audit.openSavedAuditReport(record);
   }
 
   formatSavedDate(isoString: string): string {

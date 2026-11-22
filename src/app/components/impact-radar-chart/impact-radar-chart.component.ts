@@ -38,7 +38,11 @@ interface RechartsRadarDatum {
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <section class="radar-impact-card" aria-labelledby="radar-impact-heading">
+    <section
+      class="radar-impact-card"
+      [class.is-entering]="isEntering()"
+      aria-labelledby="radar-impact-heading"
+    >
       <div class="radar-impact-card__header">
         <div>
           <div class="radar-impact-card__eyebrow">
@@ -81,7 +85,7 @@ interface RechartsRadarDatum {
 
       <div class="radar-impact-card__grid">
         <!-- Recharts SVG Radar Canvas -->
-        <div class="radar-canvas-shell">
+        <div class="radar-canvas-shell" [class.is-entering]="isEntering()">
           <div class="radar-legend" aria-label="Radar chart legend">
             <span class="radar-legend__item">
               <span class="radar-legend__swatch radar-legend__swatch--before" aria-hidden="true"></span>
@@ -96,6 +100,7 @@ interface RechartsRadarDatum {
           <div
             #radarContainer
             class="radar-svg-host recharts-host-container"
+            [class.is-animating-entrance]="isEntering()"
             role="img"
             aria-label="Recharts radar chart comparing before and after performance and accessibility metrics"
           ></div>
@@ -117,7 +122,7 @@ interface RechartsRadarDatum {
         </div>
 
         <!-- Metric Breakdown & Delta List -->
-        <div class="radar-metrics-panel">
+        <div class="radar-metrics-panel" [class.is-entering]="isEntering()">
           <div class="radar-headline-kpis">
             <div class="radar-kpi-box">
               <span class="radar-kpi-box__label">Performance score</span>
@@ -145,10 +150,12 @@ interface RechartsRadarDatum {
           </div>
 
           <ul class="radar-axes-list" aria-label="Before vs after metric breakdown">
-            @for (axis of activeAxes(); track axis.id) {
+            @for (axis of activeAxes(); track axis.id; let idx = $index) {
               <li
                 class="radar-axis-row"
                 [class.is-highlighted]="focusedAxis()?.id === axis.id"
+                [class.is-entering]="isEntering()"
+                [style.animation-delay.ms]="idx * 45"
                 tabindex="0"
                 (mouseenter)="hoveredAxisId.set(axis.id)"
                 (mouseleave)="hoveredAxisId.set(null)"
@@ -188,12 +195,17 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
   readonly metrics = input.required<AuditImpactMetrics>();
   readonly selectedCount = input.required<number>();
   readonly totalCount = input.required<number>();
+  readonly activeCategoryTab = input<string>('all');
 
   @ViewChild('radarContainer', { static: true })
   private readonly radarContainer!: ElementRef<HTMLDivElement>;
 
   readonly viewMode = signal<'detailed' | 'categories'>('detailed');
   readonly hoveredAxisId = signal<string | null>(null);
+  readonly isEntering = signal<boolean>(true);
+  private readonly animCycle = signal<number>(1);
+  private enterTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastCategoryTab = 'all';
 
   readonly activeAxes = computed<RadarMetricAxis[]>(() => {
     const m = this.metrics();
@@ -214,20 +226,42 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
 
   constructor() {
     effect(() => {
+      const catTab = this.activeCategoryTab();
+      if (this.isViewReady && catTab !== this.lastCategoryTab) {
+        this.lastCategoryTab = catTab;
+        if (catTab === 'performance' && this.viewMode() === 'detailed') {
+          this.hoveredAxisId.set('lcp');
+        } else if (catTab === 'accessibility' && this.viewMode() === 'detailed') {
+          this.hoveredAxisId.set('accessibility-score');
+        } else if (catTab !== 'all' && this.viewMode() === 'categories') {
+          this.hoveredAxisId.set(`cat-${catTab}`);
+        }
+        this.triggerEntranceAnimation();
+      }
+    });
+
+    effect(() => {
       const axes = this.activeAxes();
       const selCount = this.selectedCount();
+      const cycle = this.animCycle();
       if (this.isViewReady) {
-        this.renderRechartsRadar(axes, selCount);
+        this.renderRechartsRadar(axes, selCount, cycle);
       }
     });
   }
 
   ngAfterViewInit(): void {
     this.isViewReady = true;
-    this.renderRechartsRadar(this.activeAxes(), this.selectedCount());
+    this.lastCategoryTab = this.activeCategoryTab();
+    this.triggerEntranceAnimation();
+    this.renderRechartsRadar(this.activeAxes(), this.selectedCount(), this.animCycle());
   }
 
   ngOnDestroy(): void {
+    if (this.enterTimer) {
+      clearTimeout(this.enterTimer);
+      this.enterTimer = null;
+    }
     if (this.reactRoot) {
       this.reactRoot.unmount();
       this.reactRoot = null;
@@ -235,11 +269,34 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
   }
 
   setViewMode(mode: 'detailed' | 'categories'): void {
+    if (this.viewMode() === mode) {
+      this.triggerEntranceAnimation();
+      return;
+    }
     this.viewMode.set(mode);
     this.hoveredAxisId.set(null);
+    this.triggerEntranceAnimation();
   }
 
-  private renderRechartsRadar(axes: RadarMetricAxis[], selectedCount: number): void {
+  triggerEntranceAnimation(): void {
+    if (this.enterTimer) {
+      clearTimeout(this.enterTimer);
+    }
+    this.isEntering.set(false);
+    this.animCycle.update((n) => n + 1);
+    setTimeout(() => {
+      this.isEntering.set(true);
+      this.enterTimer = setTimeout(() => {
+        this.isEntering.set(false);
+      }, 720);
+    }, 16);
+  }
+
+  private renderRechartsRadar(
+    axes: RadarMetricAxis[],
+    selectedCount: number,
+    cycle: number
+  ): void {
     const hostEl = this.radarContainer?.nativeElement;
     if (!hostEl || typeof window === 'undefined' || axes.length < 3) return;
 
@@ -289,6 +346,7 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
         },
       }),
       React.createElement(Radar, {
+        key: `radar-before-${this.viewMode()}-${cycle}`,
         name: 'Before (Baseline)',
         dataKey: 'before',
         stroke: '#94a3b8',
@@ -297,9 +355,12 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
         fill: '#94a3b8',
         fillOpacity: 0.18,
         isAnimationActive: true,
-        animationDuration: 320,
+        animationBegin: 20,
+        animationDuration: 560,
+        animationEasing: 'ease-out',
       }),
       React.createElement(Radar, {
+        key: `radar-after-${this.viewMode()}-${cycle}`,
         name: `After (${selectedCount} Selected Commits)`,
         dataKey: 'after',
         stroke: 'var(--accent-primary)',
@@ -313,7 +374,9 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
           strokeWidth: 1.5,
         },
         isAnimationActive: true,
-        animationDuration: 380,
+        animationBegin: 70,
+        animationDuration: 680,
+        animationEasing: 'ease-out',
       }),
       React.createElement(Tooltip, {
         contentStyle: {

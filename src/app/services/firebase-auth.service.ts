@@ -13,6 +13,7 @@ import {
   deleteDoc,
   doc,
   getDoc,
+  getDocs,
   onSnapshot,
   query,
   serverTimestamp,
@@ -50,6 +51,9 @@ export class FirebaseAuthService {
   readonly authError = signal<string | null>(null);
   readonly showGithubSetupModal = signal<boolean>(false);
   readonly isHistoryDrawerOpen = signal<boolean>(false);
+  readonly isHistoryModalOpen = signal<boolean>(false);
+  readonly view4SubView = signal<'pr' | 'history'>('pr');
+  readonly isLoadingHistory = signal<boolean>(false);
   readonly isSavingAudit = signal<boolean>(false);
   readonly saveSuccessBanner = signal<string | null>(null);
   readonly savedAudits = signal<SavedAuditHistoryRecord[]>([]);
@@ -212,7 +216,73 @@ export class FirebaseAuthService {
   }
 
   toggleHistoryDrawer(): void {
-    this.isHistoryDrawerOpen.set(!this.isHistoryDrawerOpen());
+    const next = !this.isHistoryDrawerOpen();
+    this.isHistoryDrawerOpen.set(next);
+    if (next && this.currentUser()) {
+      void this.fetchSavedAuditsFromFirestore();
+    }
+  }
+
+  openHistoryModal(): void {
+    this.isHistoryModalOpen.set(true);
+    if (this.currentUser()) {
+      void this.fetchSavedAuditsFromFirestore();
+    }
+  }
+
+  closeHistoryModal(): void {
+    this.isHistoryModalOpen.set(false);
+  }
+
+  setView4SubView(subView: 'pr' | 'history'): void {
+    this.view4SubView.set(subView);
+    if (subView === 'history' && this.currentUser()) {
+      void this.fetchSavedAuditsFromFirestore();
+    }
+  }
+
+  /**
+   * Explicitly fetches the authenticated user's saved audit history from Firestore
+   * (/users/{uid}/audits and /audits where ownerId == uid) and updates savedAudits.
+   */
+  async fetchSavedAuditsFromFirestore(): Promise<SavedAuditHistoryRecord[]> {
+    const user = this.currentUser();
+    if (!user) return [];
+    const sanitizedUid = this.sanitizeId(user.uid);
+    this.isLoadingHistory.set(true);
+
+    const profileAuditsPath = `users/${sanitizedUid}/audits`;
+    try {
+      const profileSnap = await getDocs(
+        query(collection(db, 'users', sanitizedUid, 'audits'), where('ownerId', '==', sanitizedUid))
+      );
+      this.profileAuditMap.clear();
+      profileSnap.forEach((docSnap) => {
+        const rec = this.parseAuditSnapshotDoc(docSnap.id, docSnap.data(), sanitizedUid);
+        this.profileAuditMap.set(rec.auditId, rec);
+      });
+    } catch (error) {
+      this.isLoadingHistory.set(false);
+      handleFirestoreError(error, OperationType.LIST, profileAuditsPath);
+    }
+
+    try {
+      const topSnap = await getDocs(
+        query(collection(db, 'audits'), where('ownerId', '==', sanitizedUid))
+      );
+      this.topLevelAuditMap.clear();
+      topSnap.forEach((docSnap) => {
+        const rec = this.parseAuditSnapshotDoc(docSnap.id, docSnap.data(), sanitizedUid);
+        this.topLevelAuditMap.set(rec.auditId, rec);
+      });
+    } catch (error) {
+      this.isLoadingHistory.set(false);
+      handleFirestoreError(error, OperationType.LIST, 'audits');
+    }
+
+    this.syncCombinedAudits();
+    this.isLoadingHistory.set(false);
+    return this.savedAudits();
   }
 
   /**

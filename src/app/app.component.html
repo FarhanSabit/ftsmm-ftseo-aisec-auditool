@@ -152,13 +152,22 @@
             }
           </p>
         </div>
-        <button
-          type="button"
-          class="export-pill-btn export-pill-btn--ghost"
-          (click)="fbAuth.toggleHistoryDrawer()"
-        >
-          <span>Close history</span>
-        </button>
+        <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
+          <button
+            type="button"
+            class="export-pill-btn"
+            (click)="fbAuth.openHistoryModal()"
+          >
+            <span>Open in modal</span>
+          </button>
+          <button
+            type="button"
+            class="export-pill-btn export-pill-btn--ghost"
+            (click)="fbAuth.toggleHistoryDrawer()"
+          >
+            <span>Close history</span>
+          </button>
+        </div>
       </div>
 
       @if (!sessionState.isAuthenticated) {
@@ -333,6 +342,158 @@
             Dismiss
           </button>
         </div>
+      </div>
+    </div>
+  }
+
+  <!-- =====================================================================
+       SAVED AUDIT HISTORY MODAL (FETCHED FROM FIRESTORE)
+       ===================================================================== -->
+  @if (fbAuth.isHistoryModalOpen()) {
+    @let modalSession = fbAuth.userSession();
+    <div
+      class="history-modal-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="saved-history-modal-title"
+    >
+      <div class="history-modal-card">
+        <div class="history-modal-card__head">
+          <div>
+            <span class="soft-pill soft-pill--accent">
+              {{
+                modalSession.isAuthenticated
+                  ? 'Firestore · ' + modalSession.profilePath + '/audits'
+                  : 'Firebase Authentication · GitHub OAuth'
+              }}
+            </span>
+            <h2 id="saved-history-modal-title" class="history-modal-card__title">
+              Saved audit reports ({{ fbAuth.savedAudits().length }})
+            </h2>
+            <p class="history-modal-card__desc">
+              @if (modalSession.isAuthenticated) {
+                Fetched from your Firestore profile (<code>{{ modalSession.displayName }}</code>). Click any saved report below to open its full code audit report and radar chart.
+              } @else {
+                Sign in with GitHub OAuth to fetch and open your saved repository audit reports from Firestore.
+              }
+            </p>
+          </div>
+
+          <div class="history-modal-card__top-actions">
+            @if (modalSession.isAuthenticated) {
+              <button
+                type="button"
+                class="export-pill-btn"
+                [disabled]="fbAuth.isLoadingHistory()"
+                (click)="fbAuth.fetchSavedAuditsFromFirestore()"
+              >
+                <span>{{ fbAuth.isLoadingHistory() ? 'Fetching...' : 'Refresh from Firestore' }}</span>
+              </button>
+            }
+            <button
+              type="button"
+              class="icon-pill-btn"
+              aria-label="Close saved audit history modal"
+              (click)="fbAuth.closeHistoryModal()"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+
+        @if (!modalSession.isAuthenticated) {
+          <div class="history-empty-state">
+            <p style="margin: 0 0 0.85rem;">
+              Sign in with GitHub OAuth to load your personal saved audit history from Firestore.
+            </p>
+            <div style="display: flex; flex-wrap: wrap; justify-content: center; gap: 0.65rem;">
+              <button
+                type="button"
+                class="primary-flow-btn"
+                [disabled]="fbAuth.isSigningIn()"
+                (click)="fbAuth.signInWithGitHub()"
+              >
+                <span>{{ fbAuth.isSigningIn() ? 'Signing in...' : 'GitHub Login' }}</span>
+              </button>
+              <button
+                type="button"
+                class="secondary-flow-btn"
+                [disabled]="fbAuth.isSigningIn()"
+                (click)="fbAuth.signInWithGoogle()"
+              >
+                <span>Continue with Google Sign-In</span>
+              </button>
+            </div>
+          </div>
+        } @else if (fbAuth.isLoadingHistory() && fbAuth.savedAudits().length === 0) {
+          <div class="history-empty-state" role="status" aria-live="polite">
+            <p>Fetching your saved audit reports from Firestore...</p>
+          </div>
+        } @else if (fbAuth.savedAudits().length === 0) {
+          <div class="history-empty-state">
+            <p>
+              No saved audit reports found in Firestore yet. Click <strong>Save to account</strong> on any audit report or pull request view to save a snapshot.
+            </p>
+          </div>
+        } @else {
+          <ul class="clickable-report-list" aria-label="Clickable saved audit reports">
+            @for (rec of fbAuth.savedAudits(); track rec.auditId) {
+              <li class="clickable-report-list__item">
+                <div
+                  class="clickable-report-card"
+                  role="button"
+                  tabindex="0"
+                  [attr.aria-label]="'Open saved audit report for ' + rec.repoFullName"
+                  (click)="onOpenSavedAudit(rec)"
+                  (keydown.enter)="onOpenSavedAudit(rec)"
+                  (keydown.space)="onOpenSavedAudit(rec); $event.preventDefault()"
+                >
+                  <div class="clickable-report-card__top">
+                    <div class="clickable-report-card__identity">
+                      <span class="clickable-report-card__repo">{{ rec.repoFullName }}</span>
+                      <span class="clickable-report-card__badge">
+                        {{ rec.runPhase === 'lhr' ? 'Run 2 · Lighthouse JSON' : 'Run 1 · Static Code Audit' }}
+                      </span>
+                      <span class="clickable-report-card__branch">branch: {{ rec.branch || 'main' }}</span>
+                    </div>
+                    <span class="clickable-report-card__date">{{ formatSavedDate(rec.updatedAtIso) }}</span>
+                  </div>
+
+                  <div class="clickable-report-card__metrics">
+                    <span class="history-metric-pill">
+                      Performance: <strong>{{ rec.performanceBefore }} → {{ rec.performanceAfter }}</strong>
+                      (+{{ rec.performanceAfter - rec.performanceBefore }} pts)
+                    </span>
+                    <span class="history-metric-pill">
+                      Accessibility: <strong>{{ rec.accessibilityBefore }} → {{ rec.accessibilityAfter }}</strong>
+                      (+{{ rec.accessibilityAfter - rec.accessibilityBefore }} pts)
+                    </span>
+                    <span class="history-metric-pill">
+                      {{ rec.selectedCommitsCount }} of {{ rec.totalCommitsCount }} commits selected
+                    </span>
+                  </div>
+
+                  @if (rec.summaryNotes) {
+                    <p class="clickable-report-card__notes">{{ rec.summaryNotes }}</p>
+                  }
+
+                  <div class="clickable-report-card__footer">
+                    <span class="clickable-report-card__cta">
+                      Open interactive audit report →
+                    </span>
+                    <button
+                      type="button"
+                      class="text-action-btn"
+                      (click)="fbAuth.deleteSavedAudit(rec.auditId); $event.stopPropagation()"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              </li>
+            }
+          </ul>
+        }
       </div>
     </div>
   }
@@ -525,27 +686,49 @@
 
               <button
                 type="button"
-                class="export-pill-btn"
+                class="export-pill-btn export-pill-btn--md"
                 (click)="audit.exportReportAsMarkdown()"
                 title="Download structured Markdown (.md) audit report"
               >
-                <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
-                  <path d="M9 3.2v7.8M5.8 8.2L9 11.4l3.2-3.2M3.5 14.2h11" stroke-linecap="round" stroke-linejoin="round" />
-                </svg>
-                <span>Export Markdown (.md)</span>
+                <span class="file-type-indicator file-type-indicator--md" aria-hidden="true">
+                  <svg viewBox="0 0 20 16" fill="none" stroke="currentColor" stroke-width="1.6">
+                    <rect x="1.2" y="1.2" width="17.6" height="13.6" rx="2.8" />
+                    <path d="M4.2 11V5l2.3 2.8L8.8 5v6M13.6 5v6m0 0l-2-2.1m2 2.1l2-2.1" stroke-linecap="round" stroke-linejoin="round" />
+                  </svg>
+                  <span class="file-type-indicator__ext">.MD</span>
+                </span>
+                <span>Export Markdown</span>
+              </button>
+
+              <button
+                type="button"
+                class="export-pill-btn export-pill-btn--pdf"
+                (click)="audit.exportReportAsPdf()"
+                title="Download formatted PDF (.pdf) audit report"
+              >
+                <span class="file-type-indicator file-type-indicator--pdf" aria-hidden="true">
+                  <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6">
+                    <path d="M4.5 2.2h6L14.5 6.2v9.6a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1V3.2a1 1 0 0 1 1-1z" stroke-linejoin="round" />
+                    <path d="M10.2 2.2v4.2h4.3M6.8 10.2h4.4M6.8 12.8h3" stroke-linecap="round" />
+                  </svg>
+                  <span class="file-type-indicator__ext">.PDF</span>
+                </span>
+                <span>Export PDF</span>
               </button>
 
               <button
                 type="button"
                 class="export-pill-btn"
-                (click)="audit.exportReportAsPdf()"
-                title="Download formatted PDF (.pdf) audit report"
+                [class.export-pill-btn--primary]="isComparisonPanelOpen()"
+                [attr.aria-expanded]="isComparisonPanelOpen()"
+                (click)="toggleComparisonPanel()"
+                title="Compare performance and accessibility improvements between two audit runs side-by-side"
               >
                 <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
-                  <path d="M5 2.5h5.5L14 6v9.5H5V2.5z" stroke-linejoin="round" />
-                  <path d="M10.2 2.5V6H14M7.2 10h3.6M7.2 12.4h2.4" stroke-linecap="round" />
+                  <rect x="2.5" y="3.2" width="5.5" height="11.6" rx="1.4" />
+                  <rect x="10" y="3.2" width="5.5" height="11.6" rx="1.4" />
                 </svg>
-                <span>Export PDF (.pdf)</span>
+                <span>{{ isComparisonPanelOpen() ? 'Hide run comparison' : 'Compare runs' }}</span>
               </button>
 
               <button
@@ -605,11 +788,23 @@
             </div>
           }
 
-          <!-- DYNAMIC D3 RADAR CHART: BEFORE VS AFTER COMMIT IMPACT -->
+          <!-- DYNAMIC RECHARTS RADAR CHART: BEFORE VS AFTER COMMIT IMPACT -->
           <app-impact-radar-chart
             [metrics]="audit.impactMetrics()"
             [selectedCount]="audit.selectedCount()"
             [totalCount]="audit.totalCommitsCount()"
+            [activeCategoryTab]="audit.categoryFilter()"
+          />
+
+          <!-- SIDE-BY-SIDE AUDIT RUN COMPARISON PANEL / SUB-VIEW -->
+          <app-audit-run-comparison
+            [currentSession]="session"
+            [currentMetrics]="audit.impactMetrics()"
+            [selectedCommitsCount]="audit.selectedCount()"
+            [totalCommitsCount]="audit.totalCommitsCount()"
+            [savedAudits]="fbAuth.savedAudits()"
+            [isExpanded]="isComparisonPanelOpen()"
+            (toggleExpanded)="toggleComparisonPanel()"
           />
 
           <!-- Structured Report Preview & Export Drawer -->
@@ -664,7 +859,7 @@
                   [class.is-active]="audit.categoryFilter() === cat.key"
                   role="tab"
                   [attr.aria-selected]="audit.categoryFilter() === cat.key"
-                  (click)="audit.categoryFilter.set(cat.key)"
+                  (click)="onSelectCategoryFilter(cat.key)"
                 >
                   {{ cat.label }}
                   @if (cat.contextBadge) {
@@ -699,10 +894,24 @@
           }
         </header>
 
-        <!-- Commit Cards List -->
-        <div class="report-list" role="region" aria-label="Generated git commits">
-          @for (commit of audit.filteredCommits(); track commit.id; let i = $index) {
-            <article class="commit-card" [class.is-unchecked]="!isSelected(commit.id)">
+        <!-- Commit Cards List (Staggered Entrance on Category Filter Switch) -->
+        <div
+          class="report-list"
+          [attr.data-active-category]="audit.categoryFilter()"
+          role="region"
+          aria-label="Generated git commits"
+        >
+          @for (
+            commit of audit.filteredCommits();
+            track commit.id + ':' + audit.categoryFilter() + ':' + reportListAnimCycle();
+            let i = $index
+          ) {
+            <article
+              class="commit-card is-stagger-entering"
+              [class.is-unchecked]="!isSelected(commit.id)"
+              [style.--stagger-index]="i"
+              [style.animation-delay.ms]="i * 60"
+            >
               <div class="commit-card__main">
                 <div class="commit-card__content">
                   <div class="commit-card__eyebrow">
@@ -1033,7 +1242,7 @@
   }
 
   <!-- =====================================================================
-       STEP 4: 1-CLICK TERMINAL PR SUBMISSION (`git am` + `gh pr create`) + RUN 2
+       STEP 4: 1-CLICK TERMINAL PR SUBMISSION + SAVED AUDIT HISTORY SUB-VIEW
        ===================================================================== -->
   @if (audit.step() === 4 && audit.prResult(); as pr) {
     <section
@@ -1043,95 +1252,284 @@
     >
       <div class="pr-done-shell">
         <div class="pr-done-card">
-          <div class="pr-done-icon" aria-hidden="true">
-            <svg viewBox="0 0 56 56" fill="none">
-              <rect width="56" height="56" rx="20" fill="var(--accent-soft)" />
-              <path
-                d="M19 28.5l6 6 12.5-12.5"
-                stroke="var(--accent-primary)"
-                stroke-width="3"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              />
-            </svg>
+          <!-- View 4 Sub-View Navigation Switcher (PR Submission vs Saved Audit History) -->
+          <div class="view4-subview-bar">
+            <div class="view4-subview-tabs" role="tablist" aria-label="View 4 sub-views">
+              <button
+                type="button"
+                class="view4-subview-tab"
+                [class.is-active]="fbAuth.view4SubView() === 'pr'"
+                role="tab"
+                [attr.aria-selected]="fbAuth.view4SubView() === 'pr'"
+                (click)="fbAuth.setView4SubView('pr')"
+              >
+                Pull request submission
+              </button>
+              <button
+                type="button"
+                class="view4-subview-tab"
+                [class.is-active]="fbAuth.view4SubView() === 'history'"
+                role="tab"
+                [attr.aria-selected]="fbAuth.view4SubView() === 'history'"
+                (click)="fbAuth.setView4SubView('history')"
+              >
+                Saved audit history ({{ fbAuth.savedAudits().length }})
+              </button>
+            </div>
+
+            <button
+              type="button"
+              class="export-pill-btn"
+              (click)="fbAuth.openHistoryModal()"
+              title="Open saved audit history in a modal window"
+            >
+              <span>Open history modal</span>
+            </button>
           </div>
 
-          <h1 id="pr-done-heading" class="pr-done-title">
-            Submit pull request from terminal
-          </h1>
-          <p class="pr-done-subtitle">
-            Copy and run this command in your local repository terminal to create the branch, apply all selected atomic commits via <code>git am</code>, push, and open your pull request using your local <code>git</code> and <code>gh</code> credentials.
-          </p>
+          @if (fbAuth.view4SubView() === 'pr') {
+            <div class="pr-done-icon" aria-hidden="true">
+              <svg viewBox="0 0 56 56" fill="none">
+                <rect width="56" height="56" rx="20" fill="var(--accent-soft)" />
+                <path
+                  d="M19 28.5l6 6 12.5-12.5"
+                  stroke="var(--accent-primary)"
+                  stroke-width="3"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </div>
 
-          <div class="pr-cli-card">
-            <div class="pr-cli-card__top">
-              <div class="pr-cli-tabs" role="tablist" aria-label="Terminal command format">
-                <button
-                  type="button"
-                  class="pr-cli-tab"
-                  [class.is-active]="audit.prCliMode() === 'inline'"
-                  role="tab"
-                  [attr.aria-selected]="audit.prCliMode() === 'inline'"
-                  (click)="audit.prCliMode.set('inline')"
-                >
-                  Self-contained (inline patch + gh pr)
-                </button>
-                <button
-                  type="button"
-                  class="pr-cli-tab"
-                  [class.is-active]="audit.prCliMode() === 'short'"
-                  role="tab"
-                  [attr.aria-selected]="audit.prCliMode() === 'short'"
-                  (click)="audit.prCliMode.set('short')"
-                >
-                  With downloaded .patch file
+            <h1 id="pr-done-heading" class="pr-done-title">
+              Submit pull request from terminal
+            </h1>
+            <p class="pr-done-subtitle">
+              Copy and run this command in your local repository terminal to create the branch, apply all selected atomic commits via <code>git am</code>, push, and open your pull request using your local <code>git</code> and <code>gh</code> credentials.
+            </p>
+
+            @if (fbAuth.saveSuccessBanner(); as prSaveMsg) {
+              <div class="save-account-toast" role="status" aria-live="polite">
+                <span>✓ {{ prSaveMsg }}</span>
+                <button type="button" class="text-action-btn" (click)="fbAuth.setView4SubView('history')">
+                  Open Saved Audit History sub-view →
                 </button>
               </div>
-              <button
-                type="button"
-                class="primary-flow-btn pr-cli-copy-btn"
-                (click)="copyText('prCli', currentPrCliCommand())"
-              >
-                <span>{{ copiedKey() === 'prCli' ? '✓ Copied to clipboard!' : 'Copy terminal command' }}</span>
-              </button>
-            </div>
-            <pre class="pr-cli-pre"><code>{{ currentPrCliCommand() }}</code></pre>
-          </div>
+            }
 
-          <div class="pr-included-section">
-            <div class="pr-included-section__head">
-              <span>Included commits</span>
-              <span>{{ pr.selectedCommits.length }}</span>
+            <div class="pr-cli-card">
+              <div class="pr-cli-card__top">
+                <div class="pr-cli-tabs" role="tablist" aria-label="Terminal command format">
+                  <button
+                    type="button"
+                    class="pr-cli-tab"
+                    [class.is-active]="audit.prCliMode() === 'inline'"
+                    role="tab"
+                    [attr.aria-selected]="audit.prCliMode() === 'inline'"
+                    (click)="audit.prCliMode.set('inline')"
+                  >
+                    Self-contained (inline patch + gh pr)
+                  </button>
+                  <button
+                    type="button"
+                    class="pr-cli-tab"
+                    [class.is-active]="audit.prCliMode() === 'short'"
+                    role="tab"
+                    [attr.aria-selected]="audit.prCliMode() === 'short'"
+                    (click)="audit.prCliMode.set('short')"
+                  >
+                    With downloaded .patch file
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  class="primary-flow-btn pr-cli-copy-btn"
+                  (click)="copyText('prCli', currentPrCliCommand())"
+                >
+                  <span>{{ copiedKey() === 'prCli' ? '✓ Copied to clipboard!' : 'Copy terminal command' }}</span>
+                </button>
+              </div>
+              <pre class="pr-cli-pre"><code>{{ currentPrCliCommand() }}</code></pre>
             </div>
-            <ul class="pr-included-list">
-              @for (c of pr.selectedCommits; track c.id) {
-                <li>
-                  <span>{{ imperativeHeadline(c.title) }}</span>
-                  <span class="commit-sha-pill">{{ c.sha }}</span>
-                </li>
+
+            <div class="pr-included-section">
+              <div class="pr-included-section__head">
+                <span>Included commits</span>
+                <span>{{ pr.selectedCommits.length }}</span>
+              </div>
+              <ul class="pr-included-list">
+                @for (c of pr.selectedCommits; track c.id) {
+                  <li>
+                    <span>{{ imperativeHeadline(c.title) }}</span>
+                    <span class="commit-sha-pill">{{ c.sha }}</span>
+                  </li>
+                }
+              </ul>
+            </div>
+
+            <!-- Prompt to run the Second Pass with a Lighthouse Report JSON -->
+            @if (pr.runPhase !== 'lhr') {
+              <div class="lhr-next-run-box">
+                <span class="soft-pill soft-pill--accent">Second run</span>
+                <h3>Not quite done yet?</h3>
+                <p>
+                  Upload or paste a Lighthouse Result (LHR) <code>.json</code> report to see which categories improve with the code and generate targeted fixes for failing LHR audits.
+                </p>
+                <button
+                  type="button"
+                  class="primary-flow-btn"
+                  style="width:100%"
+                  (click)="audit.openLighthouseJsonStep()"
+                >
+                  <span>Add Lighthouse report JSON</span>
+                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <path d="M4.5 10h11M10.5 5l5 5-5 5" stroke-linecap="round" stroke-linejoin="round" />
+                  </svg>
+                </button>
+              </div>
+            }
+          } @else {
+            <!-- ===============================================================
+                 VIEW 4 SUB-VIEW: SAVED AUDIT HISTORY FROM FIRESTORE
+                 =============================================================== -->
+            @let view4Session = fbAuth.userSession();
+            <div class="saved-reports-subview" aria-labelledby="pr-done-heading">
+              <div class="saved-reports-subview__head">
+                <div>
+                  <span class="soft-pill soft-pill--accent">
+                    {{
+                      view4Session.isAuthenticated
+                        ? 'Firestore · ' + view4Session.profilePath + '/audits'
+                        : 'Firebase Authentication · GitHub OAuth'
+                    }}
+                  </span>
+                  <h1 id="pr-done-heading" class="pr-done-title" style="margin-top:0.5rem;">
+                    Saved audit history
+                  </h1>
+                  <p class="pr-done-subtitle" style="margin-bottom:0;">
+                    @if (view4Session.isAuthenticated) {
+                      Fetched directly from your personal Firestore collection. Click any saved report card below to open and inspect that audit report.
+                    } @else {
+                      Sign in with GitHub OAuth to fetch your saved audit reports from Firestore or save the current pull request snapshot.
+                    }
+                  </p>
+                </div>
+
+                <div class="saved-reports-subview__actions">
+                  @if (view4Session.isAuthenticated) {
+                    <button
+                      type="button"
+                      class="export-pill-btn"
+                      [disabled]="fbAuth.isLoadingHistory()"
+                      (click)="fbAuth.fetchSavedAuditsFromFirestore()"
+                    >
+                      <span>{{ fbAuth.isLoadingHistory() ? 'Fetching...' : 'Refresh from Firestore' }}</span>
+                    </button>
+                  }
+                  <button
+                    type="button"
+                    class="export-pill-btn export-pill-btn--primary"
+                    [disabled]="fbAuth.isSavingAudit()"
+                    (click)="onSaveAuditToAccount()"
+                  >
+                    <span>{{ fbAuth.isSavingAudit() ? 'Saving...' : 'Save current audit' }}</span>
+                  </button>
+                </div>
+              </div>
+
+              @if (!view4Session.isAuthenticated) {
+                <div class="history-empty-state">
+                  <p style="margin: 0 0 0.85rem;">
+                    Sign in with GitHub OAuth to view your saved audit history from Firestore.
+                  </p>
+                  <div style="display: flex; flex-wrap: wrap; justify-content: center; gap: 0.65rem;">
+                    <button
+                      type="button"
+                      class="primary-flow-btn"
+                      [disabled]="fbAuth.isSigningIn()"
+                      (click)="fbAuth.signInWithGitHub()"
+                    >
+                      <span>{{ fbAuth.isSigningIn() ? 'Signing in...' : 'GitHub Login' }}</span>
+                    </button>
+                    <button
+                      type="button"
+                      class="secondary-flow-btn"
+                      [disabled]="fbAuth.isSigningIn()"
+                      (click)="fbAuth.signInWithGoogle()"
+                    >
+                      <span>Continue with Google Sign-In</span>
+                    </button>
+                  </div>
+                </div>
+              } @else if (fbAuth.isLoadingHistory() && fbAuth.savedAudits().length === 0) {
+                <div class="history-empty-state" role="status" aria-live="polite">
+                  <p>Loading saved audit reports from Firestore...</p>
+                </div>
+              } @else if (fbAuth.savedAudits().length === 0) {
+                <div class="history-empty-state">
+                  <p>
+                    No saved audit reports in your Firestore profile yet. Click <strong>Save current audit</strong> above to persist this report.
+                  </p>
+                </div>
+              } @else {
+                <ul class="clickable-report-list" aria-label="Saved audit reports from Firestore">
+                  @for (rec of fbAuth.savedAudits(); track rec.auditId) {
+                    <li class="clickable-report-list__item">
+                      <div
+                        class="clickable-report-card"
+                        role="button"
+                        tabindex="0"
+                        [attr.aria-label]="'Open saved audit report for ' + rec.repoFullName"
+                        (click)="onOpenSavedAudit(rec)"
+                        (keydown.enter)="onOpenSavedAudit(rec)"
+                        (keydown.space)="onOpenSavedAudit(rec); $event.preventDefault()"
+                      >
+                        <div class="clickable-report-card__top">
+                          <div class="clickable-report-card__identity">
+                            <span class="clickable-report-card__repo">{{ rec.repoFullName }}</span>
+                            <span class="clickable-report-card__badge">
+                              {{ rec.runPhase === 'lhr' ? 'Run 2 · Lighthouse JSON' : 'Run 1 · Static Code Audit' }}
+                            </span>
+                            <span class="clickable-report-card__branch">branch: {{ rec.branch || 'main' }}</span>
+                          </div>
+                          <span class="clickable-report-card__date">{{ formatSavedDate(rec.updatedAtIso) }}</span>
+                        </div>
+
+                        <div class="clickable-report-card__metrics">
+                          <span class="history-metric-pill">
+                            Performance: <strong>{{ rec.performanceBefore }} → {{ rec.performanceAfter }}</strong>
+                            (+{{ rec.performanceAfter - rec.performanceBefore }} pts)
+                          </span>
+                          <span class="history-metric-pill">
+                            Accessibility: <strong>{{ rec.accessibilityBefore }} → {{ rec.accessibilityAfter }}</strong>
+                            (+{{ rec.accessibilityAfter - rec.accessibilityBefore }} pts)
+                          </span>
+                          <span class="history-metric-pill">
+                            {{ rec.selectedCommitsCount }} of {{ rec.totalCommitsCount }} commits selected
+                          </span>
+                        </div>
+
+                        @if (rec.summaryNotes) {
+                          <p class="clickable-report-card__notes">{{ rec.summaryNotes }}</p>
+                        }
+
+                        <div class="clickable-report-card__footer">
+                          <span class="clickable-report-card__cta">
+                            Open interactive audit report →
+                          </span>
+                          <button
+                            type="button"
+                            class="text-action-btn"
+                            (click)="fbAuth.deleteSavedAudit(rec.auditId); $event.stopPropagation()"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    </li>
+                  }
+                </ul>
               }
-            </ul>
-          </div>
-
-          <!-- Prompt to run the Second Pass with a Lighthouse Report JSON -->
-          @if (pr.runPhase !== 'lhr') {
-            <div class="lhr-next-run-box">
-              <span class="soft-pill soft-pill--accent">Second run</span>
-              <h3>Not quite done yet?</h3>
-              <p>
-                Upload or paste a Lighthouse Result (LHR) <code>.json</code> report to see which categories improve with the code and generate targeted fixes for failing LHR audits.
-              </p>
-              <button
-                type="button"
-                class="primary-flow-btn"
-                style="width:100%"
-                (click)="audit.openLighthouseJsonStep()"
-              >
-                <span>Add Lighthouse report JSON</span>
-                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                  <path d="M4.5 10h11M10.5 5l5 5-5 5" stroke-linecap="round" stroke-linejoin="round" />
-                </svg>
-              </button>
             </div>
           }
 
@@ -1150,6 +1548,13 @@
               (click)="onSaveAuditToAccount()"
             >
               {{ fbAuth.isSavingAudit() ? 'Saving...' : 'Save to account' }}
+            </button>
+            <button
+              type="button"
+              class="secondary-flow-btn"
+              (click)="fbAuth.setView4SubView(fbAuth.view4SubView() === 'history' ? 'pr' : 'history')"
+            >
+              {{ fbAuth.view4SubView() === 'history' ? 'View PR terminal command' : 'Saved audit history (' + fbAuth.savedAudits().length + ')' }}
             </button>
             <button
               type="button"

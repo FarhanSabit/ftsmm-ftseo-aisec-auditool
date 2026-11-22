@@ -22,7 +22,8 @@ import {
   PatchBundle,
   PullRequestResult,
   RadarMetricAxis,
-  ReportExportBundle
+  ReportExportBundle,
+  SavedAuditHistoryRecord
 } from '../models/audit.model';
 
 export const DEFAULT_SAMPLE_LHR_JSON = JSON.stringify(
@@ -707,6 +708,85 @@ export class AuditService {
     this.session.set(updated);
     this.prepareReportState(updated);
     this.transitionToStep(updated.runPhase === 'lhr' ? 7 : 3);
+  }
+
+  /**
+   * Restores a saved audit report from Firestore and transitions directly
+   * to the interactive Report page (Step 3 or Step 7).
+   */
+  async openSavedAuditReport(record: SavedAuditHistoryRecord): Promise<void> {
+    this.stopPolling();
+    this.mode.set(record.mode || 'live');
+    this.isPatchDrawerOpen.set(false);
+    this.isExportDrawerOpen.set(false);
+    this.groundingResult.set(null);
+    this.groundingError.set(null);
+
+    try {
+      const started = await firstValueFrom(
+        this.http.post<AuditSession>(
+          '/api/audit/start',
+          {
+            repoUrl: record.repoUrl || `https://github.com/${record.repoFullName}`,
+            mode: record.mode || 'live',
+            branch: record.branch || 'main',
+            categories: ['performance', 'accessibility', 'best-practices', 'seo', 'security']
+          },
+          this.apiOptions()
+        )
+      );
+
+      let completed: AuditSession;
+      if (record.runPhase === 'lhr') {
+        const lhrStarted = await firstValueFrom(
+          this.http.post<AuditSession>(
+            `/api/audit/${started.id}/lhr-start`,
+            {
+              lhrJson: this.lhrJsonInput() || DEFAULT_SAMPLE_LHR_JSON
+            },
+            this.apiOptions()
+          )
+        );
+        completed = await firstValueFrom(
+          this.http.post<AuditSession>(
+            `/api/audit/${lhrStarted.id}/fast-forward`,
+            {},
+            this.apiOptions()
+          )
+        );
+      } else {
+        completed = await firstValueFrom(
+          this.http.post<AuditSession>(
+            `/api/audit/${started.id}/fast-forward`,
+            {},
+            this.apiOptions()
+          )
+        );
+      }
+
+      this.session.set(completed);
+      this.prepareReportState(completed);
+
+      // If the saved record specifies which commit titles were selected, restore that selection
+      if (record.commitTitles && record.commitTitles.length > 0 && completed.commits.length > 0) {
+        const titleSet = new Set(record.commitTitles.map((t) => t.trim().toLowerCase()));
+        const matchedIds = completed.commits
+          .filter((c) => titleSet.has(c.title.trim().toLowerCase()))
+          .map((c) => c.id);
+        if (matchedIds.length > 0) {
+          this.selectedCommitIds.set(new Set(matchedIds));
+          void this.refreshPatchBundle();
+          void this.refreshExportBundle();
+        }
+      }
+
+      this.transitionToStep(completed.runPhase === 'lhr' ? 7 : 3);
+    } catch {
+      await this.startAudit(
+        record.repoUrl || `https://github.com/${record.repoFullName}`,
+        record.mode || 'live'
+      );
+    }
   }
 
   private prepareReportState(sessionData: AuditSession): void {

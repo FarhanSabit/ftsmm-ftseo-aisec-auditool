@@ -195,6 +195,7 @@ export interface SavedAuditHistoryRecord {
   ownerId: string;
   repoFullName: string;
   repoUrl: string;
+  branch?: string;
   runPhase: AuditRunPhase;
   mode: AuditMode;
   totalCommitsCount: number;
