@@ -160,7 +160,7 @@ export interface RadarCompareAxisRow {
             @if (viewMode() === 'history') {
               <span class="radar-selected-pill">
                 @if (isTrendAnalysisEnabled()) {
-                  {{ activeTrendPoints().length }} timeline sessions ({{ savedAudits().length }} in Firestore) · Perf {{ firstTrendPoint().performanceScore }}→{{ latestTrendPoint().performanceScore }} · LCP {{ firstTrendPoint().lcpSeconds }}s→{{ latestTrendPoint().lcpSeconds }}s · CLS {{ firstTrendPoint().clsValue }}→{{ latestTrendPoint().clsValue }}
+                  {{ activeTrendPoints().length }} timeline sessions ({{ savedAudits().length }} in Firestore) · LCP {{ firstTrendPoint().lcpSeconds }}s→{{ latestTrendPoint().lcpSeconds }}s · CLS {{ firstTrendPoint().clsValue }}→{{ latestTrendPoint().clsValue }} · FID {{ firstTrendPoint().inpMs }}ms→{{ latestTrendPoint().inpMs }}ms
                 } @else {
                   {{ repoFirestoreSessions().length }} Firestore
                   {{ repoFirestoreSessions().length === 1 ? 'snapshot' : 'snapshots' }} ·
@@ -181,9 +181,9 @@ export interface RadarCompareAxisRow {
             @if (viewMode() === 'history') {
               @if (isTrendAnalysisEnabled()) {
                 @if (trendScope() === 'all-sessions') {
-                  D3 Trend Analysis: Historical performance improvements across all saved Firestore sessions ({{ activeTrendPoints().length }} sessions)
+                  D3 Trend Analysis: Historical LCP, CLS &amp; FID improvements across all saved Firestore sessions ({{ activeTrendPoints().length }} sessions)
                 } @else {
-                  D3 Trend Analysis: Performance, LCP &amp; CLS trajectory over last 5 audits ({{ repoFullName() }})
+                  D3 Trend Analysis: LCP, CLS &amp; FID trajectory over last 5 audits ({{ repoFullName() }})
                 }
               } @else {
                 Multi-session performance &amp; accessibility trajectory ({{ repoFullName() }})
@@ -197,7 +197,7 @@ export interface RadarCompareAxisRow {
           <p class="radar-impact-card__subtitle">
             @if (viewMode() === 'history') {
               @if (isTrendAnalysisEnabled()) {
-                D3 multi-series line chart plotting historical performance metric improvements (Overall Performance, LCP, CLS, INP/FID &amp; Accessibility) across all saved audit sessions using the timeline data stored in Firestore.
+                D3 multi-series line chart plotting historical performance metric improvements (LCP, CLS, FID &amp; Overall Performance) across all saved audit sessions fetched from Firestore.
               } @else {
                 Visualizes how {{ repoFullName() }} evolved across past Firestore audit sessions—from initial baseline inspection through saved historical runs to your current active session.
               }
@@ -451,27 +451,7 @@ export interface RadarCompareAxisRow {
       <div class="radar-impact-card__grid">
         <!-- Left Canvas: Recharts SVG Radar OR D3 5-Audit Trend Analysis Line Chart -->
         <div class="radar-canvas-shell" [class.is-entering]="isEntering()">
-          @if (viewMode() === 'history' && isTrendAnalysisEnabled()) {
-            <!-- D3 Trend Analysis Legend -->
-            <div class="radar-legend d3-trend-legend" aria-label="D3 Firestore timeline performance trend legend">
-              <span class="radar-legend__item">
-                <span class="d3-legend-line d3-legend-line--perf" aria-hidden="true"></span>
-                <span>Overall Perf ({{ firstTrendPoint().performanceScore }} → {{ latestTrendPoint().performanceScore }})</span>
-              </span>
-              <span class="radar-legend__item">
-                <span class="d3-legend-line d3-legend-line--lcp" aria-hidden="true"></span>
-                <span>LCP ({{ firstTrendPoint().lcpSeconds }}s → {{ latestTrendPoint().lcpSeconds }}s)</span>
-              </span>
-              <span class="radar-legend__item">
-                <span class="d3-legend-line d3-legend-line--cls" aria-hidden="true"></span>
-                <span>CLS ({{ firstTrendPoint().clsValue }} → {{ latestTrendPoint().clsValue }})</span>
-              </span>
-              <span class="radar-legend__item">
-                <span class="d3-legend-line d3-legend-line--a11y" aria-hidden="true"></span>
-                <span>A11y ({{ firstTrendPoint().accessibilityScore }} → {{ latestTrendPoint().accessibilityScore }})</span>
-              </span>
-            </div>
-          } @else if (viewMode() === 'history') {
+          @if (viewMode() === 'history') {
             <div class="radar-legend" aria-label="Historical radar trajectory legend">
               @for (s of historySessions(); track s.id) {
                 <span class="radar-legend__item">
@@ -514,12 +494,11 @@ export interface RadarCompareAxisRow {
             </div>
           }
 
-          <!-- Recharts Radar Host (hidden when D3 Trend Analysis is active on History tab) -->
+          <!-- Recharts Radar Host (Always rendered for Detailed, Categories, Compare, AND Multi-Session History Trajectory) -->
           <div
             #radarContainer
             class="radar-svg-host recharts-host-container"
             [class.is-animating-entrance]="isEntering()"
-            [style.display]="viewMode() === 'history' && isTrendAnalysisEnabled() ? 'none' : 'flex'"
             role="img"
             [attr.aria-label]="
               viewMode() === 'history'
@@ -530,6 +509,28 @@ export interface RadarCompareAxisRow {
             "
           ></div>
 
+          @if (viewMode() === 'history' && isTrendAnalysisEnabled()) {
+            <!-- D3 Trend Analysis Legend (LCP, CLS, FID & Overall Performance) -->
+            <div class="radar-legend d3-trend-legend" style="margin-top: 0.75rem;" aria-label="D3 Firestore timeline LCP, CLS, and FID performance trend legend">
+              <span class="radar-legend__item">
+                <span class="d3-legend-line d3-legend-line--lcp" aria-hidden="true"></span>
+                <span>LCP ({{ firstTrendPoint().lcpSeconds }}s → {{ latestTrendPoint().lcpSeconds }}s)</span>
+              </span>
+              <span class="radar-legend__item">
+                <span class="d3-legend-line d3-legend-line--cls" aria-hidden="true"></span>
+                <span>CLS ({{ firstTrendPoint().clsValue }} → {{ latestTrendPoint().clsValue }})</span>
+              </span>
+              <span class="radar-legend__item">
+                <span class="d3-legend-line d3-legend-line--fid" aria-hidden="true"></span>
+                <span>FID ({{ firstTrendPoint().inpMs }}ms → {{ latestTrendPoint().inpMs }}ms)</span>
+              </span>
+              <span class="radar-legend__item">
+                <span class="d3-legend-line d3-legend-line--perf" aria-hidden="true"></span>
+                <span>Overall Perf ({{ firstTrendPoint().performanceScore }} → {{ latestTrendPoint().performanceScore }})</span>
+              </span>
+            </div>
+          }
+
           <!-- D3 Historical Trend Analysis Line Chart SVG Host (shown when Trend Analysis is toggled ON in History tab) -->
           <div
             #d3TrendContainer
@@ -538,7 +539,7 @@ export interface RadarCompareAxisRow {
             [style.display]="viewMode() === 'history' && isTrendAnalysisEnabled() ? 'flex' : 'none'"
             role="img"
             [attr.aria-label]="
-              'D3 line chart plotting historical performance, LCP, CLS, and accessibility improvements across ' + activeTrendPoints().length + ' saved Firestore audit sessions for ' + repoFullName()
+              'D3 line chart plotting historical performance, LCP, CLS, and FID improvements across ' + activeTrendPoints().length + ' saved Firestore audit sessions for ' + repoFullName()
             "
           ></div>
 
@@ -551,11 +552,13 @@ export interface RadarCompareAxisRow {
                   <span class="score-mid">LCP: {{ activeAudit.lcpSeconds }}s ({{ activeAudit.lcpScore }})</span>
                   <span aria-hidden="true">·</span>
                   <span class="score-after">CLS: {{ activeAudit.clsValue }} ({{ activeAudit.clsScore }})</span>
+                  <span aria-hidden="true">·</span>
+                  <span class="score-before">FID: {{ activeAudit.inpMs }}ms ({{ activeAudit.fidScore }})</span>
                   <span class="score-delta">Perf {{ activeAudit.performanceScore }}</span>
                 </span>
               </div>
               <p class="radar-axis-spotlight__desc">
-                {{ activeAudit.sourceBadge }} · {{ activeAudit.timestampLabel }} · {{ activeAudit.commitsLabel }} applied (INP/FID score {{ activeAudit.fidScore }}, A11y score {{ activeAudit.accessibilityScore }}).
+                {{ activeAudit.sourceBadge }} · {{ activeAudit.timestampLabel }} · {{ activeAudit.commitsLabel }} applied (FID {{ activeAudit.inpMs }}ms / score {{ activeAudit.fidScore }}, A11y score {{ activeAudit.accessibilityScore }}).
               </p>
             </div>
           } @else if (viewMode() === 'history') {
@@ -610,105 +613,10 @@ export interface RadarCompareAxisRow {
           }
         </div>
 
-        <!-- Right Panel: D3 All-Session Firestore Timeline Breakdown, Standard History Trajectory, Side-by-Side Comparison, OR Before/After -->
+        <!-- Right Panel: Multi-Session History Trajectory + D3 All-Session Firestore Timeline Breakdown, Side-by-Side Comparison, OR Before/After -->
         <div class="radar-metrics-panel" [class.is-entering]="isEntering()">
-          @if (viewMode() === 'history' && isTrendAnalysisEnabled()) {
+          @if (viewMode() === 'history') {
             <!-- Firestore Timeline Status Strip -->
-            <div class="radar-history-source-bar">
-              <div class="radar-history-source-bar__info">
-                <span class="radar-history-source-bar__dot" aria-hidden="true"></span>
-                <span>
-                  @if (savedAudits().length > 0) {
-                    D3 Line Chart synced with <strong>{{ savedAudits().length }}</strong> saved Firestore
-                    {{ savedAudits().length === 1 ? 'session' : 'sessions' }} ({{ activeTrendPoints().length }} total timeline checkpoints)
-                  } @else {
-                    Plotting <strong>{{ activeTrendPoints().length }}</strong> historical audit checkpoints (click <strong>Save to account</strong> to add live Firestore sessions)
-                  }
-                </span>
-              </div>
-            </div>
-
-            <!-- Core Web Vitals & Performance Timeline Improvement Summary KPIs -->
-            <div class="cwv-trend-summary-grid" aria-label="Historical performance and Core Web Vitals improvement across all saved audit sessions">
-              <div class="cwv-trend-kpi cwv-trend-kpi--lcp">
-                <div class="cwv-trend-kpi__top">
-                  <span class="cwv-trend-kpi__tag">LCP · Largest Contentful Paint</span>
-                  <span class="cwv-trend-kpi__gain">+{{ latestTrendPoint().lcpScore - firstTrendPoint().lcpScore }} pts</span>
-                </div>
-                <div class="cwv-trend-kpi__values">
-                  <span class="cwv-trend-kpi__before">{{ firstTrendPoint().lcpSeconds }}s</span>
-                  <span aria-hidden="true">→</span>
-                  <strong class="cwv-trend-kpi__after">{{ latestTrendPoint().lcpSeconds }}s</strong>
-                  <span class="cwv-trend-kpi__sub">
-                    (Score {{ firstTrendPoint().lcpScore }} → {{ latestTrendPoint().lcpScore }})
-                  </span>
-                </div>
-              </div>
-
-              <div class="cwv-trend-kpi cwv-trend-kpi--cls">
-                <div class="cwv-trend-kpi__top">
-                  <span class="cwv-trend-kpi__tag">CLS · Cumulative Layout Shift</span>
-                  <span class="cwv-trend-kpi__gain">+{{ latestTrendPoint().clsScore - firstTrendPoint().clsScore }} pts</span>
-                </div>
-                <div class="cwv-trend-kpi__values">
-                  <span class="cwv-trend-kpi__before">{{ firstTrendPoint().clsValue }}</span>
-                  <span aria-hidden="true">→</span>
-                  <strong class="cwv-trend-kpi__after">{{ latestTrendPoint().clsValue }}</strong>
-                  <span class="cwv-trend-kpi__sub">
-                    (Score {{ firstTrendPoint().clsScore }} → {{ latestTrendPoint().clsScore }})
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <!-- All Saved Firestore Audit Sessions Chronological Trajectory List -->
-            <ul class="radar-axes-list d3-five-audits-list" aria-label="Historical Firestore audit sessions performance progression">
-              @for (pt of activeTrendPoints(); track pt.id; let idx = $index) {
-                <li
-                  class="radar-axis-row d3-audit-trend-row"
-                  [class.is-highlighted]="focusedTrendPoint().auditIndex === pt.auditIndex"
-                  [class.is-entering]="isEntering()"
-                  [style.animation-delay.ms]="idx * 40"
-                  tabindex="0"
-                  (mouseenter)="hoveredTrendIndex.set(pt.auditIndex)"
-                  (mouseleave)="hoveredTrendIndex.set(null)"
-                  (focus)="hoveredTrendIndex.set(pt.auditIndex)"
-                  (blur)="hoveredTrendIndex.set(null)"
-                >
-                  <div class="radar-axis-row__top">
-                    <div class="d3-audit-trend-row__title-group">
-                      <span class="d3-audit-trend-row__step">{{ pt.shortLabel }}</span>
-                      <span class="radar-axis-row__name">{{ pt.title }}</span>
-                      @if (pt.isFirestoreBacked) {
-                        <span class="d3-significance-pill d3-significance-pill--firestore">Firestore</span>
-                      }
-                      @if (idx === 0) {
-                        <span class="d3-significance-pill d3-significance-pill--initial">Initial Scan</span>
-                      } @else if (idx === activeTrendPoints().length - 1) {
-                        <span class="d3-significance-pill d3-significance-pill--latest">Latest Optimized</span>
-                      }
-                    </div>
-                    <span class="d3-audit-trend-row__date">{{ pt.timestampLabel }}</span>
-                  </div>
-
-                  <div class="d3-audit-trend-row__metrics">
-                    <span class="d3-cwv-chip d3-cwv-chip--perf">
-                      Perf: <strong>{{ pt.performanceScore }}</strong>
-                    </span>
-                    <span class="d3-cwv-chip d3-cwv-chip--lcp">
-                      LCP: <strong>{{ pt.lcpSeconds }}s</strong> ({{ pt.lcpScore }})
-                    </span>
-                    <span class="d3-cwv-chip d3-cwv-chip--cls">
-                      CLS: <strong>{{ pt.clsValue }}</strong> ({{ pt.clsScore }})
-                    </span>
-                    <span class="d3-cwv-chip">
-                      A11y: <strong>{{ pt.accessibilityScore }}</strong>
-                    </span>
-                  </div>
-                </li>
-              }
-            </ul>
-          } @else if (viewMode() === 'history') {
             <div class="radar-history-source-bar">
               <div class="radar-history-source-bar__info">
                 <span class="radar-history-source-bar__dot" aria-hidden="true"></span>
@@ -716,12 +624,12 @@ export interface RadarCompareAxisRow {
                   @if (repoFirestoreSessions().length > 0) {
                     Synced with <strong>{{ repoFirestoreSessions().length }}</strong> saved Firestore
                     {{ repoFirestoreSessions().length === 1 ? 'session' : 'sessions' }} for
-                    <code>{{ repoFullName() }}</code>
+                    <code>{{ repoFullName() }}</code> ({{ activeTrendPoints().length }} trajectory checkpoints)
                   } @else if (savedAudits().length > 0) {
-                    Showing trajectory with <strong>{{ savedAudits().length }}</strong> Firestore profile
-                    {{ savedAudits().length === 1 ? 'snapshot' : 'snapshots' }}
+                    Synced with <strong>{{ savedAudits().length }}</strong> saved Firestore
+                    {{ savedAudits().length === 1 ? 'session' : 'sessions' }} ({{ activeTrendPoints().length }} trajectory checkpoints)
                   } @else {
-                    Showing baseline-to-current trajectory (save audits to Firestore to add live checkpoints)
+                    Plotting <strong>{{ activeTrendPoints().length }}</strong> historical audit checkpoints (click <strong>Save to account</strong> to add live Firestore sessions)
                   }
                 </span>
               </div>
@@ -738,7 +646,7 @@ export interface RadarCompareAxisRow {
               }
             </div>
 
-            <!-- Chronological Session Checkpoints -->
+            <!-- Chronological Session Checkpoints (Session 1 -> Session 2 -> Session 3) -->
             <div class="radar-history-timeline" aria-label="Audit session trajectory checkpoints">
               @for (s of historySessions(); track s.id; let idx = $index) {
                 <div
@@ -765,6 +673,119 @@ export interface RadarCompareAxisRow {
                 </div>
               }
             </div>
+
+            @if (isTrendAnalysisEnabled()) {
+              <!-- Core Web Vitals (LCP, CLS, FID) Timeline Improvement Summary KPIs -->
+              <div class="cwv-trend-summary-grid" aria-label="Historical LCP, CLS, and FID performance improvements across all saved audit sessions">
+                <div class="cwv-trend-kpi cwv-trend-kpi--lcp">
+                  <div class="cwv-trend-kpi__top">
+                    <span class="cwv-trend-kpi__tag">LCP · Largest Contentful Paint</span>
+                    <span class="cwv-trend-kpi__gain">+{{ latestTrendPoint().lcpScore - firstTrendPoint().lcpScore }} pts</span>
+                  </div>
+                  <div class="cwv-trend-kpi__values">
+                    <span class="cwv-trend-kpi__before">{{ firstTrendPoint().lcpSeconds }}s</span>
+                    <span aria-hidden="true">→</span>
+                    <strong class="cwv-trend-kpi__after">{{ latestTrendPoint().lcpSeconds }}s</strong>
+                    <span class="cwv-trend-kpi__sub">
+                      (Score {{ firstTrendPoint().lcpScore }} → {{ latestTrendPoint().lcpScore }})
+                    </span>
+                  </div>
+                </div>
+
+                <div class="cwv-trend-kpi cwv-trend-kpi--cls">
+                  <div class="cwv-trend-kpi__top">
+                    <span class="cwv-trend-kpi__tag">CLS · Cumulative Layout Shift</span>
+                    <span class="cwv-trend-kpi__gain">+{{ latestTrendPoint().clsScore - firstTrendPoint().clsScore }} pts</span>
+                  </div>
+                  <div class="cwv-trend-kpi__values">
+                    <span class="cwv-trend-kpi__before">{{ firstTrendPoint().clsValue }}</span>
+                    <span aria-hidden="true">→</span>
+                    <strong class="cwv-trend-kpi__after">{{ latestTrendPoint().clsValue }}</strong>
+                    <span class="cwv-trend-kpi__sub">
+                      (Score {{ firstTrendPoint().clsScore }} → {{ latestTrendPoint().clsScore }})
+                    </span>
+                  </div>
+                </div>
+
+                <div class="cwv-trend-kpi cwv-trend-kpi--fid">
+                  <div class="cwv-trend-kpi__top">
+                    <span class="cwv-trend-kpi__tag">FID · First Input Delay</span>
+                    <span class="cwv-trend-kpi__gain">+{{ latestTrendPoint().fidScore - firstTrendPoint().fidScore }} pts</span>
+                  </div>
+                  <div class="cwv-trend-kpi__values">
+                    <span class="cwv-trend-kpi__before">{{ firstTrendPoint().inpMs }}ms</span>
+                    <span aria-hidden="true">→</span>
+                    <strong class="cwv-trend-kpi__after">{{ latestTrendPoint().inpMs }}ms</strong>
+                    <span class="cwv-trend-kpi__sub">
+                      (Score {{ firstTrendPoint().fidScore }} → {{ latestTrendPoint().fidScore }})
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- All Saved Firestore Audit Sessions Chronological Trajectory List -->
+              <ul class="radar-axes-list d3-five-audits-list" aria-label="Historical Firestore audit sessions LCP, CLS, and FID progression">
+                @for (pt of activeTrendPoints(); track pt.id; let idx = $index) {
+                  <li
+                    class="radar-axis-row d3-audit-trend-row"
+                    [class.is-highlighted]="focusedTrendPoint().auditIndex === pt.auditIndex"
+                    [class.is-entering]="isEntering()"
+                    [style.animation-delay.ms]="idx * 40"
+                    tabindex="0"
+                    (mouseenter)="hoveredTrendIndex.set(pt.auditIndex)"
+                    (mouseleave)="hoveredTrendIndex.set(null)"
+                    (focus)="hoveredTrendIndex.set(pt.auditIndex)"
+                    (blur)="hoveredTrendIndex.set(null)"
+                  >
+                    <div class="radar-axis-row__top">
+                      <div class="d3-audit-trend-row__title-group">
+                        <span class="d3-audit-trend-row__step">{{ pt.shortLabel }}</span>
+                        <span class="radar-axis-row__name">{{ pt.title }}</span>
+                        @if (pt.isFirestoreBacked) {
+                          <span class="d3-significance-pill d3-significance-pill--firestore">Firestore</span>
+                        }
+                        @if (idx === 0) {
+                          <span class="d3-significance-pill d3-significance-pill--initial">Initial Scan</span>
+                        } @else if (idx === activeTrendPoints().length - 1) {
+                          <span class="d3-significance-pill d3-significance-pill--latest">Latest Optimized</span>
+                        }
+                      </div>
+                      <div style="display:flex;align-items:center;gap:0.45rem;">
+                        @if (idx === 0 || idx === activeTrendPoints().length - 1) {
+                          <button
+                            type="button"
+                            class="text-action-btn"
+                            (click)="onTriggerAutoCompare(); $event.stopPropagation()"
+                            title="Open Initial Scan vs. Latest Optimized Run in the side-by-side comparison panel"
+                          >
+                            Auto-Compare →
+                          </button>
+                        }
+                        <span class="d3-audit-trend-row__date">{{ pt.timestampLabel }}</span>
+                      </div>
+                    </div>
+
+                    <div class="d3-audit-trend-row__metrics">
+                      <span class="d3-cwv-chip d3-cwv-chip--lcp">
+                        LCP: <strong>{{ pt.lcpSeconds }}s</strong> ({{ pt.lcpScore }})
+                      </span>
+                      <span class="d3-cwv-chip d3-cwv-chip--cls">
+                        CLS: <strong>{{ pt.clsValue }}</strong> ({{ pt.clsScore }})
+                      </span>
+                      <span class="d3-cwv-chip d3-cwv-chip--fid">
+                        FID: <strong>{{ pt.inpMs }}ms</strong> ({{ pt.fidScore }})
+                      </span>
+                      <span class="d3-cwv-chip d3-cwv-chip--perf">
+                        Perf: <strong>{{ pt.performanceScore }}</strong>
+                      </span>
+                      <span class="d3-cwv-chip">
+                        A11y: <strong>{{ pt.accessibilityScore }}</strong>
+                      </span>
+                    </div>
+                  </li>
+                }
+              </ul>
+            }
 
             <!-- 6-Axis Multi-Session Trajectory List -->
             <ul class="radar-axes-list" aria-label="Multi-session metric trajectory breakdown">
@@ -964,6 +985,8 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
 
   readonly refreshHistory = output<void>();
   readonly autoCompareRequested = output<void>();
+  readonly viewModeChanged = output<'detailed' | 'categories' | 'history' | 'compare'>();
+  readonly externalViewMode = input<'detailed' | 'categories' | 'history' | 'compare' | null>(null);
 
   @ViewChild('radarContainer', { static: true })
   private readonly radarContainer!: ElementRef<HTMLDivElement>;
@@ -972,7 +995,7 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
   private readonly d3TrendContainer!: ElementRef<HTMLDivElement>;
 
   readonly viewMode = signal<'detailed' | 'categories' | 'history' | 'compare'>('detailed');
-  readonly isTrendAnalysisEnabled = signal<boolean>(false);
+  readonly isTrendAnalysisEnabled = signal<boolean>(true);
   readonly trendScope = signal<'all-sessions' | 'last-5'>('all-sessions');
   readonly hoveredTrendIndex = signal<number | null>(null);
   readonly isCompareDrawerOpen = signal<boolean>(false);
@@ -1895,6 +1918,17 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
 
   constructor() {
     effect(() => {
+      const extMode = this.externalViewMode();
+      if (extMode && extMode !== this.viewMode()) {
+        this.viewMode.set(extMode);
+        if (extMode === 'history' || extMode === 'compare') {
+          this.refreshHistory.emit();
+        }
+        this.triggerEntranceAnimation();
+      }
+    });
+
+    effect(() => {
       const catTab = this.activeCategoryTab();
       if (this.isViewReady && catTab !== this.lastCategoryTab) {
         this.lastCategoryTab = catTab;
@@ -1925,20 +1959,20 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
 
       if (!this.isViewReady) return;
 
+      this.renderRechartsRadar(
+        mode,
+        axes,
+        histRows,
+        histSessions,
+        compareRows,
+        runA,
+        runB,
+        selCount,
+        cycle
+      );
+
       if (mode === 'history' && trendOn) {
         this.renderD3TrendChart(trendPoints, focusedIdx);
-      } else {
-        this.renderRechartsRadar(
-          mode,
-          axes,
-          histRows,
-          histSessions,
-          compareRows,
-          runA,
-          runB,
-          selCount,
-          cycle
-        );
       }
     });
   }
@@ -1947,22 +1981,21 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
     this.isViewReady = true;
     this.lastCategoryTab = this.activeCategoryTab();
     this.triggerEntranceAnimation();
+    this.renderRechartsRadar(
+      this.viewMode(),
+      this.activeAxes(),
+      this.historyAxisRows(),
+      this.historySessions(),
+      this.compareAxisRows(),
+      this.selectedCompareRunA(),
+      this.selectedCompareRunB(),
+      this.selectedCount(),
+      this.animCycle()
+    );
     if (this.viewMode() === 'history' && this.isTrendAnalysisEnabled()) {
       this.renderD3TrendChart(
         this.activeTrendPoints(),
         this.focusedTrendPoint().auditIndex
-      );
-    } else {
-      this.renderRechartsRadar(
-        this.viewMode(),
-        this.activeAxes(),
-        this.historyAxisRows(),
-        this.historySessions(),
-        this.compareAxisRows(),
-        this.selectedCompareRunA(),
-        this.selectedCompareRunB(),
-        this.selectedCount(),
-        this.animCycle()
       );
     }
   }
@@ -1985,6 +2018,7 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
     if (mode === 'compare') {
       this.isCompareDrawerOpen.set(true);
     }
+    this.viewModeChanged.emit(mode);
     if (this.viewMode() === mode) {
       this.triggerEntranceAnimation();
       return;
@@ -2013,15 +2047,11 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
   }
 
   onTriggerAutoCompare(): void {
-    this.autoSelectSignificantPairInRadar();
+    this.syncSignificantPairIds();
     this.autoCompareRequested.emit();
   }
 
-  /**
-   * Identifies the two most significant audit runs (initial scan vs. latest optimized version)
-   * and selects them in the radar comparison view.
-   */
-  autoSelectSignificantPairInRadar(): void {
+  private syncSignificantPairIds(): void {
     const opts = this.comparableRunOptions();
     if (opts.length < 2) return;
 
@@ -2050,7 +2080,14 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
         latestOpt.id !== initialOpt.id ? latestOpt.id : opts[1].id
       );
     }
+  }
 
+  /**
+   * Identifies the two most significant audit runs (initial scan vs. latest optimized version)
+   * and selects them in the radar comparison view.
+   */
+  autoSelectSignificantPairInRadar(): void {
+    this.syncSignificantPairIds();
     this.isCompareDrawerOpen.set(true);
     this.viewMode.set('compare');
     this.triggerEntranceAnimation();
@@ -2180,6 +2217,25 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
       .attr('stop-color', '#10b981')
       .attr('stop-opacity', 0.01);
 
+    // Gradient fill under FID trajectory curve
+    const fidGrad = defs
+      .append('linearGradient')
+      .attr('id', 'd3-fid-area-grad')
+      .attr('x1', '0%')
+      .attr('y1', '0%')
+      .attr('x2', '0%')
+      .attr('y2', '100%');
+    fidGrad
+      .append('stop')
+      .attr('offset', '0%')
+      .attr('stop-color', '#8b5cf6')
+      .attr('stop-opacity', 0.16);
+    fidGrad
+      .append('stop')
+      .attr('offset', '100%')
+      .attr('stop-color', '#8b5cf6')
+      .attr('stop-opacity', 0.01);
+
     const g = svg
       .append('g')
       .attr('transform', `translate(${margin.left},${margin.top})`);
@@ -2208,9 +2264,9 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
       .attr('x', 6)
       .attr('y', goodBandBottom - 4)
       .attr('fill', '#10b981')
-      .attr('font-size', '8.5px')
+      .attr('font-size', '8.2px')
       .attr('font-weight', '700')
-      .text('90+ Good Core Web Vitals Zone (LCP ≤ 2.5s · CLS ≤ 0.10)');
+      .text('90+ Good Core Web Vitals Zone (LCP ≤ 2.5s · CLS ≤ 0.10 · FID ≤ 100ms)');
 
     // Horizontal grid lines
     const yTicks = [50, 60, 70, 80, 90, 100];
@@ -2290,7 +2346,7 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
         .text(subAxisLabel);
     });
 
-    // Area generators for LCP & CLS
+    // Area generators for LCP, CLS, and FID
     const lcpArea = d3
       .area<FiveAuditTrendPoint>()
       .x((d) => xScale(d.auditIndex) ?? 0)
@@ -2305,6 +2361,13 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
       .y1((d) => yScale(d.clsScore))
       .curve(d3.curveMonotoneX);
 
+    const fidArea = d3
+      .area<FiveAuditTrendPoint>()
+      .x((d) => xScale(d.auditIndex) ?? 0)
+      .y0(innerHeight)
+      .y1((d) => yScale(d.fidScore))
+      .curve(d3.curveMonotoneX);
+
     g.append('path')
       .datum(points)
       .attr('fill', 'url(#d3-lcp-area-grad)')
@@ -2314,6 +2377,11 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
       .datum(points)
       .attr('fill', 'url(#d3-cls-area-grad)')
       .attr('d', clsArea);
+
+    g.append('path')
+      .datum(points)
+      .attr('fill', 'url(#d3-fid-area-grad)')
+      .attr('d', fidArea);
 
     // Line generator helper
     const makeLine = (accessor: (d: FiveAuditTrendPoint) => number) =>
@@ -2332,30 +2400,30 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
       accessor: (d: FiveAuditTrendPoint) => number;
     }[] = [
       {
-        id: 'a11y',
-        label: 'Accessibility',
-        color: '#f59e0b',
-        strokeWidth: 1.7,
-        dash: '4 3',
-        accessor: (d) => d.accessibilityScore,
-      },
-      {
         id: 'perf',
-        label: 'Performance',
+        label: 'Overall Performance',
         color: 'var(--accent-primary)',
-        strokeWidth: 2.3,
+        strokeWidth: 1.9,
+        dash: '4 3',
         accessor: (d) => d.performanceScore,
       },
       {
+        id: 'fid',
+        label: 'FID (First Input Delay)',
+        color: '#8b5cf6',
+        strokeWidth: 2.4,
+        accessor: (d) => d.fidScore,
+      },
+      {
         id: 'cls',
-        label: 'CLS',
+        label: 'CLS (Cumulative Layout Shift)',
         color: '#10b981',
         strokeWidth: 2.5,
         accessor: (d) => d.clsScore,
       },
       {
         id: 'lcp',
-        label: 'LCP',
+        label: 'LCP (Largest Contentful Paint)',
         color: '#0ea5e9',
         strokeWidth: 2.8,
         accessor: (d) => d.lcpScore,
@@ -2392,18 +2460,18 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
       });
     });
 
-    // Core Web Vitals Direct Callout Badges on Audit 1 (Initial) and Audit 5 (Latest)
+    // Core Web Vitals Direct Callout Badges (LCP, CLS, FID) on Initial and Latest sessions
     const first = points[0];
     const last = points[points.length - 1];
     const xFirst = xScale(first.auditIndex) ?? 0;
     const xLast = xScale(last.auditIndex) ?? innerWidth;
 
-    // Initial LCP & CLS callouts
+    // Initial LCP, CLS & FID callouts
     g.append('text')
       .attr('x', xFirst + 4)
       .attr('y', yScale(first.lcpScore) + 13)
       .attr('fill', '#0284c7')
-      .attr('font-size', '8.8px')
+      .attr('font-size', '8.5px')
       .attr('font-weight', '700')
       .attr('font-family', 'var(--font-mono)')
       .text(`LCP ${first.lcpSeconds}s`);
@@ -2412,18 +2480,27 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
       .attr('x', xFirst + 4)
       .attr('y', yScale(first.clsScore) - 7)
       .attr('fill', '#059669')
-      .attr('font-size', '8.8px')
+      .attr('font-size', '8.5px')
       .attr('font-weight', '700')
       .attr('font-family', 'var(--font-mono)')
       .text(`CLS ${first.clsValue}`);
 
-    // Final optimized LCP & CLS callouts
+    g.append('text')
+      .attr('x', xFirst + 4)
+      .attr('y', yScale(first.fidScore) + 3)
+      .attr('fill', '#7c3aed')
+      .attr('font-size', '8.5px')
+      .attr('font-weight', '700')
+      .attr('font-family', 'var(--font-mono)')
+      .text(`FID ${first.inpMs}ms`);
+
+    // Final optimized LCP, CLS & FID callouts
     g.append('text')
       .attr('x', xLast - 4)
       .attr('y', yScale(last.lcpScore) + 14)
       .attr('text-anchor', 'end')
       .attr('fill', '#0284c7')
-      .attr('font-size', '9px')
+      .attr('font-size', '8.6px')
       .attr('font-weight', '700')
       .attr('font-family', 'var(--font-mono)')
       .text(`LCP ${last.lcpSeconds}s (+${last.lcpScore - first.lcpScore})`);
@@ -2433,10 +2510,20 @@ export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
       .attr('y', Math.max(11, yScale(last.clsScore) - 7))
       .attr('text-anchor', 'end')
       .attr('fill', '#059669')
-      .attr('font-size', '9px')
+      .attr('font-size', '8.6px')
       .attr('font-weight', '700')
       .attr('font-family', 'var(--font-mono)')
       .text(`CLS ${last.clsValue} (+${last.clsScore - first.clsScore})`);
+
+    g.append('text')
+      .attr('x', xLast - 4)
+      .attr('y', Math.min(innerHeight - 4, yScale(last.fidScore) + 25))
+      .attr('text-anchor', 'end')
+      .attr('fill', '#7c3aed')
+      .attr('font-size', '8.6px')
+      .attr('font-weight', '700')
+      .attr('font-family', 'var(--font-mono)')
+      .text(`FID ${last.inpMs}ms (+${last.fidScore - first.fidScore})`);
   }
 
   private renderRechartsRadar(

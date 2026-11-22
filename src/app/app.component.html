@@ -841,12 +841,14 @@
             [selectedCount]="audit.selectedCount()"
             [totalCount]="audit.totalCommitsCount()"
             [activeCategoryTab]="audit.categoryFilter()"
+            [externalViewMode]="radarViewMode()"
             [repoFullName]="session.repo.fullName"
             [savedAudits]="fbAuth.savedAudits()"
             [isAuthenticated]="fbAuth.isAuthenticated()"
             [isLoadingHistory]="fbAuth.isLoadingHistory()"
             (refreshHistory)="fbAuth.fetchSavedAuditsFromFirestore()"
             (autoCompareRequested)="onAutoCompareFromHistory()"
+            (viewModeChanged)="onRadarViewModeChanged($event)"
           />
 
           <!-- SIDE-BY-SIDE AUDIT RUN COMPARISON PANEL / SUB-VIEW -->
@@ -1049,14 +1051,14 @@
           }
 
           <div class="report-controls">
-            <div class="category-pills" role="tablist" aria-label="Filter by audit category">
+            <div class="category-pills" role="tablist" aria-label="Filter by audit category or view Firestore history trajectory">
               @for (cat of visibleCategories(); track cat.key) {
                 <button
                   type="button"
                   class="cat-pill"
-                  [class.is-active]="audit.categoryFilter() === cat.key"
+                  [class.is-active]="!isReportHistoryTabActive() && audit.categoryFilter() === cat.key"
                   role="tab"
-                  [attr.aria-selected]="audit.categoryFilter() === cat.key"
+                  [attr.aria-selected]="!isReportHistoryTabActive() && audit.categoryFilter() === cat.key"
                   (click)="onSelectCategoryFilter(cat.key)"
                 >
                   {{ cat.label }}
@@ -1066,6 +1068,21 @@
                   <span>{{ audit.categoryCounts()[cat.key] }}</span>
                 </button>
               }
+
+              <button
+                type="button"
+                id="report-page-history-tab"
+                class="cat-pill cat-pill--history"
+                [class.is-active]="isReportHistoryTabActive()"
+                role="tab"
+                [attr.aria-selected]="isReportHistoryTabActive()"
+                (click)="onSelectReportHistoryTab()"
+                title="Fetch audit history from Firestore and visualize the performance trajectory of the repository over multiple past audit sessions"
+              >
+                History
+                <span class="cat-pill__context">Firestore</span>
+                <span>{{ fbAuth.savedAudits().length }}</span>
+              </button>
             </div>
 
             <div class="bulk-select-links">
@@ -1078,6 +1095,137 @@
               </button>
             </div>
           </div>
+
+          @if (isReportHistoryTabActive()) {
+            @let histSession = fbAuth.userSession();
+            <section
+              id="report-history-trajectory-panel"
+              class="saved-reports-subview"
+              style="margin-top: 1rem;"
+              aria-label="Firestore audit history and multi-session performance trajectory"
+            >
+              <div class="saved-reports-subview__head">
+                <div>
+                  <span class="soft-pill soft-pill--accent">
+                    {{
+                      histSession.isAuthenticated
+                        ? 'Firestore Trajectory · ' + histSession.profilePath + '/audits'
+                        : 'Firestore Performance Trajectory · Multi-Session History'
+                    }}
+                  </span>
+                  <h2 class="export-report-card__title" style="margin-top: 0.45rem;">
+                    Repository performance trajectory across past Firestore audit sessions ({{ session.repo.fullName }})
+                  </h2>
+                  <p class="export-report-card__desc" style="margin-bottom: 0;">
+                    Fetches your saved audit sessions from Firestore and visualizes the progressive performance and accessibility trajectory of <code>{{ session.repo.fullName }}</code> across past sessions on both the Recharts Radar and D3 Trend Line Chart above.
+                  </p>
+                </div>
+
+                <div class="saved-reports-subview__actions">
+                  <button
+                    type="button"
+                    class="export-pill-btn export-pill-btn--primary"
+                    (click)="onAutoCompareFromHistory()"
+                  >
+                    <span>⚡ Auto-Compare (Initial vs. Latest)</span>
+                  </button>
+                  @if (histSession.isAuthenticated) {
+                    <button
+                      type="button"
+                      class="export-pill-btn"
+                      [disabled]="fbAuth.isLoadingHistory()"
+                      (click)="fbAuth.fetchSavedAuditsFromFirestore()"
+                    >
+                      <span>{{ fbAuth.isLoadingHistory() ? 'Fetching Firestore...' : '↻ Refresh from Firestore' }}</span>
+                    </button>
+                  }
+                  <button
+                    type="button"
+                    class="export-pill-btn"
+                    [disabled]="fbAuth.isSavingAudit()"
+                    (click)="onSaveAuditToAccount()"
+                  >
+                    <span>{{ fbAuth.isSavingAudit() ? 'Saving...' : 'Save current session to Firestore' }}</span>
+                  </button>
+                </div>
+              </div>
+
+              @if (fbAuth.savedAudits().length > 0) {
+                <ul class="clickable-report-list" style="margin-top: 0.85rem;" aria-label="Saved Firestore audit sessions for performance trajectory">
+                  @for (rec of fbAuth.savedAudits(); track rec.auditId; let sIdx = $index) {
+                    <li class="clickable-report-list__item">
+                      <div
+                        class="clickable-report-card"
+                        role="button"
+                        tabindex="0"
+                        [attr.aria-label]="'Open saved Firestore audit session for ' + rec.repoFullName"
+                        (click)="onOpenSavedAudit(rec)"
+                        (keydown.enter)="onOpenSavedAudit(rec)"
+                        (keydown.space)="onOpenSavedAudit(rec); $event.preventDefault()"
+                      >
+                        <div class="clickable-report-card__top">
+                          <div class="clickable-report-card__identity">
+                            <span class="d3-significance-pill d3-significance-pill--firestore">Firestore Session #{{ fbAuth.savedAudits().length - sIdx }}</span>
+                            <span class="clickable-report-card__repo">{{ rec.repoFullName }}</span>
+                            @if (isSignificantInitialAudit(rec)) {
+                              <span class="d3-significance-pill d3-significance-pill--initial">Initial Scan</span>
+                            } @else if (isSignificantLatestAudit(rec)) {
+                              <span class="d3-significance-pill d3-significance-pill--latest">Latest Optimized</span>
+                            }
+                            <span class="clickable-report-card__badge">
+                              {{ rec.runPhase === 'lhr' ? 'Run 2 · Lighthouse JSON' : 'Run 1 · Static Code Audit' }}
+                            </span>
+                          </div>
+                          <span class="clickable-report-card__date">{{ formatSavedDate(rec.updatedAtIso) }}</span>
+                        </div>
+
+                        <div class="clickable-report-card__metrics">
+                          <span class="history-metric-pill">
+                            Performance: <strong>{{ rec.performanceBefore }} → {{ rec.performanceAfter }}</strong>
+                            (+{{ rec.performanceAfter - rec.performanceBefore }} pts)
+                          </span>
+                          <span class="history-metric-pill">
+                            Accessibility: <strong>{{ rec.accessibilityBefore }} → {{ rec.accessibilityAfter }}</strong>
+                            (+{{ rec.accessibilityAfter - rec.accessibilityBefore }} pts)
+                          </span>
+                          <span class="history-metric-pill">
+                            {{ rec.selectedCommitsCount }} of {{ rec.totalCommitsCount }} commits applied
+                          </span>
+                        </div>
+
+                        @if (rec.summaryNotes) {
+                          <p class="clickable-report-card__notes">{{ rec.summaryNotes }}</p>
+                        }
+
+                        <div class="clickable-report-card__footer">
+                          <span class="clickable-report-card__cta">
+                            Load this Firestore audit session →
+                          </span>
+                          <button
+                            type="button"
+                            class="text-action-btn"
+                            (click)="fbAuth.deleteSavedAudit(rec.auditId); $event.stopPropagation()"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    </li>
+                  }
+                </ul>
+              } @else {
+                <div class="history-empty-state" style="margin-top: 0.85rem;">
+                  <p style="margin: 0;">
+                    @if (histSession.isAuthenticated) {
+                      No saved audit snapshots in your Firestore profile yet. Click <strong>Save current session to Firestore</strong> above to persist this audit checkpoint and track its live trajectory across future runs.
+                    } @else {
+                      Viewing modeled multi-session trajectory on the Recharts Radar and D3 Line Chart above. Sign in with GitHub OAuth or Google Sign-In and click <strong>Save to account</strong> to store live repository audit sessions in Firestore.
+                    }
+                  </p>
+                </div>
+              }
+            </section>
+          }
 
           @if (session.runPhase === 'static' && audit.categoryFilter() === 'security') {
             <div class="security-context-note" role="note">

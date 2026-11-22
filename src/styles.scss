@@ -4385,9 +4385,13 @@ a.repo-stat-chip:hover {
   background: #f59e0b;
 }
 
+.d3-legend-line--fid {
+  background: #8b5cf6;
+}
+
 .cwv-trend-summary-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   gap: 0.7rem;
 }
 
@@ -4413,6 +4417,10 @@ a.repo-stat-chip:hover {
 
 .cwv-trend-kpi--cls {
   border-color: rgba(16, 185, 129, 0.45);
+}
+
+.cwv-trend-kpi--fid {
+  border-color: rgba(139, 92, 246, 0.45);
 }
 
 .cwv-trend-kpi__top {
@@ -4525,6 +4533,15 @@ a.repo-stat-chip:hover {
 
 [data-theme="dark"] .d3-cwv-chip--cls {
   color: #34d399;
+}
+
+.d3-cwv-chip--fid {
+  border-color: rgba(139, 92, 246, 0.38);
+  color: #7c3aed;
+}
+
+[data-theme="dark"] .d3-cwv-chip--fid {
+  color: #c4b5fd;
 }
 
 .d3-cwv-chip--perf {

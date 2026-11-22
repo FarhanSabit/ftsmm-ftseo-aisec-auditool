@@ -262,6 +262,58 @@ export interface MetricComparisonRow {
             @let a11yAfterDiff = b.accessibilityAfter - a.accessibilityAfter;
             @let a11yGainDiff = a11yGainB - a11yGainA;
 
+            @let lcpAfterDiff = b.lcpAfter - a.lcpAfter;
+            @let clsAfterDiff = b.clsAfter - a.clsAfter;
+            @let fidAfterDiff = b.fidAfter - a.fidAfter;
+
+            <!-- Core Web Vitals (LCP, CLS, FID) Immediate Side-by-Side Visualization Strip -->
+            <div class="cwv-trend-summary-grid" role="region" aria-label="LCP, CLS, and FID side-by-side comparison between Run A and Run B">
+              <div class="cwv-trend-kpi cwv-trend-kpi--lcp">
+                <div class="cwv-trend-kpi__top">
+                  <span class="cwv-trend-kpi__tag">LCP · Largest Contentful Paint</span>
+                  <span class="cwv-trend-kpi__gain">{{ lcpAfterDiff >= 0 ? '+' : '' }}{{ lcpAfterDiff }} pts (B vs A)</span>
+                </div>
+                <div class="cwv-trend-kpi__values">
+                  <span class="cwv-trend-kpi__before">Run A: {{ a.lcpAfter }}</span>
+                  <span aria-hidden="true">→</span>
+                  <strong class="cwv-trend-kpi__after">Run B: {{ b.lcpAfter }}</strong>
+                  <span class="cwv-trend-kpi__sub">
+                    (Baseline {{ a.lcpBefore }} → Optimized {{ b.lcpAfter }})
+                  </span>
+                </div>
+              </div>
+
+              <div class="cwv-trend-kpi cwv-trend-kpi--cls">
+                <div class="cwv-trend-kpi__top">
+                  <span class="cwv-trend-kpi__tag">CLS · Cumulative Layout Shift</span>
+                  <span class="cwv-trend-kpi__gain">{{ clsAfterDiff >= 0 ? '+' : '' }}{{ clsAfterDiff }} pts (B vs A)</span>
+                </div>
+                <div class="cwv-trend-kpi__values">
+                  <span class="cwv-trend-kpi__before">Run A: {{ a.clsAfter }}</span>
+                  <span aria-hidden="true">→</span>
+                  <strong class="cwv-trend-kpi__after">Run B: {{ b.clsAfter }}</strong>
+                  <span class="cwv-trend-kpi__sub">
+                    (Baseline {{ a.clsBefore }} → Optimized {{ b.clsAfter }})
+                  </span>
+                </div>
+              </div>
+
+              <div class="cwv-trend-kpi cwv-trend-kpi--fid">
+                <div class="cwv-trend-kpi__top">
+                  <span class="cwv-trend-kpi__tag">FID · First Input Delay</span>
+                  <span class="cwv-trend-kpi__gain">{{ fidAfterDiff >= 0 ? '+' : '' }}{{ fidAfterDiff }} pts (B vs A)</span>
+                </div>
+                <div class="cwv-trend-kpi__values">
+                  <span class="cwv-trend-kpi__before">Run A: {{ a.fidAfter }}</span>
+                  <span aria-hidden="true">→</span>
+                  <strong class="cwv-trend-kpi__after">Run B: {{ b.fidAfter }}</strong>
+                  <span class="cwv-trend-kpi__sub">
+                    (Baseline {{ a.fidBefore }} → Optimized {{ b.fidAfter }})
+                  </span>
+                </div>
+              </div>
+            </div>
+
             <!-- SIDE-BY-SIDE RECHARTS RADAR CHARTS (RUN A RADAR VS RUN B RADAR) -->
             <div class="compare-radars-grid" role="region" aria-label="Side-by-side Recharts radar charts comparing Audit Run A and Audit Run B">
               <!-- Left Radar Chart: Audit Run A (Before vs After) -->
@@ -1071,9 +1123,10 @@ export class AuditRunComparisonComponent implements AfterViewInit, OnDestroy {
       latestOptimizedRun.accessibilityAfter - initialRun.accessibilityAfter;
     const lcpDelta = latestOptimizedRun.lcpAfter - initialRun.lcpAfter;
     const clsDelta = latestOptimizedRun.clsAfter - initialRun.clsAfter;
+    const fidDelta = latestOptimizedRun.fidAfter - initialRun.fidAfter;
 
     this.autoCompareNotice.set(
-      `Paired Initial Scan (${initialRun.badge}) against Latest Optimized Version (${latestOptimizedRun.badge}) — Net improvement: +${Math.max(0, perfDelta)} Perf pts, +${Math.max(0, a11yDelta)} A11y pts, LCP +${Math.max(0, lcpDelta)} pts, CLS +${Math.max(0, clsDelta)} pts.`
+      `Paired Initial Audit Scan (${initialRun.badge}) against Most Recent Optimized Run (${latestOptimizedRun.badge}) — Net improvement: +${Math.max(0, perfDelta)} Perf pts, LCP +${Math.max(0, lcpDelta)} pts, CLS +${Math.max(0, clsDelta)} pts, FID +${Math.max(0, fidDelta)} pts, +${Math.max(0, a11yDelta)} A11y pts.`
     );
 
     this.animCycle.update((n) => n + 1);

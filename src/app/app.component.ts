@@ -35,6 +35,8 @@ export class AppComponent {
   readonly copiedKey = signal<string | null>(null);
   readonly isComparisonPanelOpen = signal<boolean>(true);
   readonly autoCompareNonce = signal<number>(0);
+  readonly radarViewMode = signal<'detailed' | 'categories' | 'history' | 'compare'>('detailed');
+  readonly isReportHistoryTabActive = computed<boolean>(() => this.radarViewMode() === 'history');
   readonly reportListAnimCycle = signal<number>(1);
   readonly isReportListEntering = signal<boolean>(true);
   private reportListAnimTimer: ReturnType<typeof setTimeout> | null = null;
@@ -146,7 +148,28 @@ export class AppComponent {
 
   onSelectCategoryFilter(category: LighthouseCategory): void {
     this.audit.categoryFilter.set(category);
+    if (this.radarViewMode() === 'history') {
+      this.radarViewMode.set('detailed');
+    }
     this.triggerReportListStagger();
+  }
+
+  onSelectReportHistoryTab(): void {
+    this.radarViewMode.set('history');
+    void this.fbAuth.fetchSavedAuditsFromFirestore();
+    if (typeof document !== 'undefined') {
+      setTimeout(() => {
+        const el = document.getElementById('radar-impact-heading');
+        el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }, 60);
+    }
+  }
+
+  onRadarViewModeChanged(mode: 'detailed' | 'categories' | 'history' | 'compare'): void {
+    this.radarViewMode.set(mode);
+    if (mode === 'history') {
+      void this.fbAuth.fetchSavedAuditsFromFirestore();
+    }
   }
 
   toggleComparisonPanel(): void {
