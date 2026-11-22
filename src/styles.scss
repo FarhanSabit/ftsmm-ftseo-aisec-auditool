@@ -2600,8 +2600,19 @@ samp {
 .radar-svg-host {
   width: 100%;
   max-width: 400px;
+  min-height: 320px;
   display: flex;
   justify-content: center;
+  align-items: center;
+}
+
+.recharts-host-container .recharts-wrapper {
+  margin: 0 auto;
+  max-width: 100%;
+}
+
+.recharts-host-container .recharts-surface {
+  overflow: visible;
 }
 
 .d3-radar-svg {

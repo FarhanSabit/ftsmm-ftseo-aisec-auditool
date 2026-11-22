@@ -120,6 +120,10 @@ export class AppComponent {
     await this.audit.runSearchGrounding();
   }
 
+  async onGithubLoginOrHistoryClick(): Promise<void> {
+    await this.fbAuth.handleGithubAuthOrProfileHistory();
+  }
+
   async onSaveAuditToAccount(): Promise<void> {
     const session = this.audit.session();
     if (!session) return;

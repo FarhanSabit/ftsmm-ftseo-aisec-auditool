@@ -1,13 +1,36 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
+import { GithubAuthProvider, GoogleAuthProvider, getAuth } from 'firebase/auth';
 import { doc, getDocFromServer, getFirestore } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
+export const firebaseAppletConfig = firebaseConfig;
 export const firebaseApp = initializeApp(firebaseConfig);
 export const db = getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(firebaseApp);
 export const FIREBASE_PROJECT_ID = firebaseConfig.projectId;
 export const FIREBASE_AUTH_DOMAIN = firebaseConfig.authDomain;
+export const FIREBASE_FIRESTORE_DATABASE_ID = firebaseConfig.firestoreDatabaseId;
+export const FIREBASE_OAUTH_CLIENT_ID = firebaseConfig.oAuthClientId ?? '';
+
+export function createGithubOAuthProvider(): GithubAuthProvider {
+  const provider = new GithubAuthProvider();
+  provider.addScope('read:user');
+  provider.addScope('user:email');
+  provider.setCustomParameters({
+    allow_signup: 'true',
+  });
+  return provider;
+}
+
+export function createGoogleOAuthProvider(): GoogleAuthProvider {
+  const provider = new GoogleAuthProvider();
+  if (FIREBASE_OAUTH_CLIENT_ID) {
+    provider.setCustomParameters({
+      client_id: FIREBASE_OAUTH_CLIENT_ID,
+    });
+  }
+  return provider;
+}
 
 export enum OperationType {
   CREATE = 'create',

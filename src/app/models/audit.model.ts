@@ -214,3 +214,20 @@ export interface SavedAuditHistoryRecord {
   createdAtIso: string;
   updatedAtIso: string;
 }
+
+export interface UserSessionState {
+  isAuthenticated: boolean;
+  isAuthReady: boolean;
+  uid: string | null;
+  displayName: string | null;
+  githubUsername: string | null;
+  photoURL: string | null;
+  providerId: 'github.com' | 'google.com' | null;
+  githubAccessToken: string | null;
+  projectId: string;
+  authDomain: string;
+  firestoreDatabaseId: string;
+  profilePath: string | null;
+  savedAuditsCount: number;
+}
+

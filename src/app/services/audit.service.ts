@@ -355,9 +355,9 @@ export class AuditService {
 
     const detailedAxes: RadarMetricAxis[] = [
       makeAxis(
-        'lcp-speed',
-        'LCP & Hero Paint Speed',
-        'LCP Speed',
+        'lcp',
+        'LCP (Largest Contentful Paint)',
+        'LCP',
         'performance',
         56,
         96,
@@ -366,9 +366,9 @@ export class AuditService {
         'Largest Contentful Paint priority hints, responsive image decoding, and critical resource preloads.'
       ),
       makeAxis(
-        'cls-stability',
-        'CLS & Layout Stability',
-        'CLS Stability',
+        'cls',
+        'CLS (Cumulative Layout Shift)',
+        'CLS',
         'performance',
         63,
         98,
@@ -377,48 +377,48 @@ export class AuditService {
         'Cumulative Layout Shift prevention via explicit intrinsic dimensions and font-display: swap.'
       ),
       makeAxis(
-        'tbt-blocking',
-        'TBT & Render Unblocking',
-        'Render Path',
+        'fid',
+        'FID / INP (First Input Delay)',
+        'FID',
         'performance',
         62,
         95,
         tbtMatch.ratio,
         tbtMatch.count,
-        'Elimination of render-blocking stylesheets and synchronous script execution bottlenecks.'
+        'First Input Delay and main-thread responsiveness improvements by eliminating render-blocking assets.'
       ),
       makeAxis(
-        'wcag-contrast',
-        'WCAG AA Color Contrast',
-        'WCAG Contrast',
+        'performance-score',
+        'Performance Score',
+        'Performance',
+        'performance',
+        performanceBefore,
+        96,
+        perf.ratio,
+        perf.selInCat,
+        'Overall Lighthouse Performance score impact across selected atomic code commits.'
+      ),
+      makeAxis(
+        'accessibility-score',
+        'Accessibility Score',
+        'Accessibility',
         'accessibility',
-        64,
+        accessibilityBefore,
         98,
-        contrastMatch.ratio,
-        contrastMatch.count,
-        'Foreground-to-background luminance ratios raised above 4.5:1 for body copy and UI controls.'
+        a11y.ratio,
+        a11y.selInCat,
+        'Overall Lighthouse Accessibility score impact across WCAG 2.2 AA contrast, ARIA labels, and landmarks.'
       ),
       makeAxis(
-        'aria-labels',
-        'ARIA & Accessible Names',
-        'ARIA Names',
+        'wcag-aria',
+        'WCAG Contrast & ARIA Semantics',
+        'WCAG & ARIA',
         'accessibility',
-        70,
-        97,
-        ariaMatch.ratio,
-        ariaMatch.count,
-        'Programmatic accessible names on icon buttons, form controls, and dynamic status regions.'
-      ),
-      makeAxis(
-        'keyboard-semantics',
-        'Landmarks & Keyboard Focus',
-        'Focus & DOM',
-        'accessibility',
-        74,
+        66,
         98,
-        focusMatch.ratio,
-        focusMatch.count,
-        'Semantic HTML5 landmarks, sequential heading hierarchy, and keyboard focus-visible rings.'
+        (contrastMatch.ratio + ariaMatch.ratio + focusMatch.ratio) / 3,
+        contrastMatch.count + ariaMatch.count,
+        'Foreground-to-background 4.5:1 contrast compliance, accessible names, and semantic landmarks.'
       )
     ];
 

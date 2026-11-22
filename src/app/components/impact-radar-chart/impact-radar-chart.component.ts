@@ -3,14 +3,35 @@ import {
   ChangeDetectionStrategy,
   Component,
   ElementRef,
+  OnDestroy,
   ViewChild,
   computed,
   effect,
   input,
   signal,
 } from '@angular/core';
-import * as d3 from 'd3';
+import * as React from 'react';
+import { Root, createRoot } from 'react-dom/client';
+import {
+  Legend,
+  PolarAngleAxis,
+  PolarGrid,
+  PolarRadiusAxis,
+  Radar,
+  RadarChart,
+  Tooltip,
+} from 'recharts';
 import { AuditImpactMetrics, RadarMetricAxis } from '../../models/audit.model';
+
+interface RechartsRadarDatum {
+  id: string;
+  metric: string;
+  fullLabel: string;
+  before: number;
+  after: number;
+  delta: number;
+  fullMark: number;
+}
 
 @Component({
   selector: 'app-impact-radar-chart',
@@ -21,16 +42,16 @@ import { AuditImpactMetrics, RadarMetricAxis } from '../../models/audit.model';
       <div class="radar-impact-card__header">
         <div>
           <div class="radar-impact-card__eyebrow">
-            <span class="soft-pill soft-pill--accent">D3 impact visualization</span>
+            <span class="soft-pill soft-pill--accent">Recharts impact radar</span>
             <span class="radar-selected-pill">
               {{ selectedCount() }} of {{ totalCount() }} commits active
             </span>
           </div>
           <h2 id="radar-impact-heading" class="radar-impact-card__title">
-            Before vs. after commit impact
+            Before vs. after commit impact (LCP, CLS, FID &amp; Accessibility)
           </h2>
           <p class="radar-impact-card__subtitle">
-            Dynamic radar projection comparing baseline repository metrics against the projected gains from your currently selected commits. Toggle any commit below to see its live impact.
+            Dynamic Recharts radar chart visualizing baseline repository metrics against the projected gains from your selected atomic code commits. Toggle any commit below to update the radar projection in real time.
           </p>
         </div>
 
@@ -43,7 +64,7 @@ import { AuditImpactMetrics, RadarMetricAxis } from '../../models/audit.model';
             [attr.aria-selected]="viewMode() === 'detailed'"
             (click)="setViewMode('detailed')"
           >
-            Performance &amp; Accessibility (6 axes)
+            LCP, CLS, FID &amp; Accessibility (6 axes)
           </button>
           <button
             type="button"
@@ -59,7 +80,7 @@ import { AuditImpactMetrics, RadarMetricAxis } from '../../models/audit.model';
       </div>
 
       <div class="radar-impact-card__grid">
-        <!-- D3 SVG Radar Canvas -->
+        <!-- Recharts SVG Radar Canvas -->
         <div class="radar-canvas-shell">
           <div class="radar-legend" aria-label="Radar chart legend">
             <span class="radar-legend__item">
@@ -72,7 +93,12 @@ import { AuditImpactMetrics, RadarMetricAxis } from '../../models/audit.model';
             </span>
           </div>
 
-          <div #radarContainer class="radar-svg-host" role="img" aria-label="D3 radar chart comparing before and after metrics"></div>
+          <div
+            #radarContainer
+            class="radar-svg-host recharts-host-container"
+            role="img"
+            aria-label="Recharts radar chart comparing before and after performance and accessibility metrics"
+          ></div>
 
           @if (focusedAxis(); as active) {
             <div class="radar-axis-spotlight" aria-live="polite">
@@ -94,7 +120,7 @@ import { AuditImpactMetrics, RadarMetricAxis } from '../../models/audit.model';
         <div class="radar-metrics-panel">
           <div class="radar-headline-kpis">
             <div class="radar-kpi-box">
-              <span class="radar-kpi-box__label">Performance impact</span>
+              <span class="radar-kpi-box__label">Performance score</span>
               <div class="radar-kpi-box__row">
                 <span class="radar-kpi-box__before">{{ metrics().performanceBefore }}</span>
                 <span class="radar-kpi-box__arrow" aria-hidden="true">→</span>
@@ -106,7 +132,7 @@ import { AuditImpactMetrics, RadarMetricAxis } from '../../models/audit.model';
             </div>
 
             <div class="radar-kpi-box">
-              <span class="radar-kpi-box__label">Accessibility impact</span>
+              <span class="radar-kpi-box__label">Accessibility score</span>
               <div class="radar-kpi-box__row">
                 <span class="radar-kpi-box__before">{{ metrics().accessibilityBefore }}</span>
                 <span class="radar-kpi-box__arrow" aria-hidden="true">→</span>
@@ -158,7 +184,7 @@ import { AuditImpactMetrics, RadarMetricAxis } from '../../models/audit.model';
     </section>
   `,
 })
-export class ImpactRadarChartComponent implements AfterViewInit {
+export class ImpactRadarChartComponent implements AfterViewInit, OnDestroy {
   readonly metrics = input.required<AuditImpactMetrics>();
   readonly selectedCount = input.required<number>();
   readonly totalCount = input.required<number>();
@@ -184,20 +210,28 @@ export class ImpactRadarChartComponent implements AfterViewInit {
   });
 
   private isViewReady = false;
+  private reactRoot: Root | null = null;
 
   constructor() {
     effect(() => {
       const axes = this.activeAxes();
-      const highlightedId = this.hoveredAxisId();
+      const selCount = this.selectedCount();
       if (this.isViewReady) {
-        this.renderD3Radar(axes, highlightedId);
+        this.renderRechartsRadar(axes, selCount);
       }
     });
   }
 
   ngAfterViewInit(): void {
     this.isViewReady = true;
-    this.renderD3Radar(this.activeAxes(), this.hoveredAxisId());
+    this.renderRechartsRadar(this.activeAxes(), this.selectedCount());
+  }
+
+  ngOnDestroy(): void {
+    if (this.reactRoot) {
+      this.reactRoot.unmount();
+      this.reactRoot = null;
+    }
   }
 
   setViewMode(mode: 'detailed' | 'categories'): void {
@@ -205,200 +239,100 @@ export class ImpactRadarChartComponent implements AfterViewInit {
     this.hoveredAxisId.set(null);
   }
 
-  private renderD3Radar(axes: RadarMetricAxis[], highlightedId: string | null): void {
+  private renderRechartsRadar(axes: RadarMetricAxis[], selectedCount: number): void {
     const hostEl = this.radarContainer?.nativeElement;
-    if (!hostEl || axes.length < 3) return;
+    if (!hostEl || typeof window === 'undefined' || axes.length < 3) return;
 
-    const width = 400;
-    const height = 340;
-    const cx = width / 2;
-    const cy = height / 2 + 4;
-    const maxRadius = 112;
-    const ringLevels = [25, 50, 75, 100];
-    const totalAxes = axes.length;
-    const angleSlice = (Math.PI * 2) / totalAxes;
-
-    const rScale = d3.scaleLinear().domain([0, 100]).range([0, maxRadius]);
-
-    let svg = d3.select(hostEl).select<SVGSVGElement>('svg');
-    if (svg.empty()) {
-      svg = d3
-        .select(hostEl)
-        .append('svg')
-        .attr('viewBox', `0 0 ${width} ${height}`)
-        .attr('class', 'd3-radar-svg');
-
-      svg.append('g').attr('class', 'radar-grid-group');
-      svg.append('g').attr('class', 'radar-axes-group');
-      svg.append('g').attr('class', 'radar-area-group');
-      svg.append('g').attr('class', 'radar-dots-group');
-      svg.append('g').attr('class', 'radar-labels-group');
+    if (!this.reactRoot) {
+      this.reactRoot = createRoot(hostEl);
     }
 
-    const gridGroup = svg.select<SVGGElement>('.radar-grid-group');
-    const axesGroup = svg.select<SVGGElement>('.radar-axes-group');
-    const areaGroup = svg.select<SVGGElement>('.radar-area-group');
-    const dotsGroup = svg.select<SVGGElement>('.radar-dots-group');
-    const labelsGroup = svg.select<SVGGElement>('.radar-labels-group');
+    const chartData: RechartsRadarDatum[] = axes.map((axis) => ({
+      id: axis.id,
+      metric: `${axis.shortLabel} (${axis.after})`,
+      fullLabel: axis.label,
+      before: axis.before,
+      after: axis.after,
+      delta: axis.delta,
+      fullMark: 100,
+    }));
 
-    const polarPoint = (value: number, idx: number): [number, number] => {
-      const r = rScale(value);
-      const angle = idx * angleSlice - Math.PI / 2;
-      return [cx + r * Math.cos(angle), cy + r * Math.sin(angle)];
-    };
+    const radarElement = React.createElement(
+      RadarChart,
+      {
+        width: 390,
+        height: 320,
+        cx: '50%',
+        cy: '52%',
+        outerRadius: 104,
+        data: chartData,
+      },
+      React.createElement(PolarGrid, {
+        stroke: 'var(--border-card)',
+        strokeDasharray: '3 3',
+      }),
+      React.createElement(PolarAngleAxis, {
+        dataKey: 'metric',
+        tick: {
+          fill: 'var(--text-main)',
+          fontSize: 11,
+          fontWeight: 600,
+        },
+      }),
+      React.createElement(PolarRadiusAxis, {
+        angle: 90,
+        domain: [0, 100],
+        tickCount: 5,
+        tick: {
+          fill: 'var(--text-muted)',
+          fontSize: 9,
+        },
+      }),
+      React.createElement(Radar, {
+        name: 'Before (Baseline)',
+        dataKey: 'before',
+        stroke: '#94a3b8',
+        strokeWidth: 1.8,
+        strokeDasharray: '5 4',
+        fill: '#94a3b8',
+        fillOpacity: 0.18,
+        isAnimationActive: true,
+        animationDuration: 320,
+      }),
+      React.createElement(Radar, {
+        name: `After (${selectedCount} Selected Commits)`,
+        dataKey: 'after',
+        stroke: 'var(--accent-primary)',
+        strokeWidth: 2.5,
+        fill: 'var(--accent-primary)',
+        fillOpacity: 0.26,
+        dot: {
+          r: 4,
+          fill: 'var(--accent-primary)',
+          stroke: 'var(--bg-card)',
+          strokeWidth: 1.5,
+        },
+        isAnimationActive: true,
+        animationDuration: 380,
+      }),
+      React.createElement(Tooltip, {
+        contentStyle: {
+          borderRadius: '14px',
+          border: '1px solid var(--border-card)',
+          backgroundColor: 'var(--bg-card)',
+          color: 'var(--text-main)',
+          fontSize: '12px',
+          boxShadow: '0 8px 24px rgba(15, 23, 42, 0.12)',
+        },
+      }),
+      React.createElement(Legend, {
+        wrapperStyle: {
+          fontSize: '11px',
+          paddingTop: '6px',
+        },
+      })
+    );
 
-    const polygonPointsAttr = (values: number[]): string =>
-      values.map((v, i) => polarPoint(v, i).join(',')).join(' ');
-
-    // 1. Concentric Fresnel polygon rings
-    const rings = gridGroup.selectAll<SVGPolygonElement, number>('polygon.radar-ring').data(ringLevels);
-    rings
-      .join('polygon')
-      .attr('class', 'radar-ring')
-      .attr('points', (lvl) => polygonPointsAttr(axes.map(() => lvl)))
-      .attr('fill', 'none')
-      .attr('stroke', 'var(--border-card)')
-      .attr('stroke-width', (lvl) => (lvl === 100 ? 1.5 : 1))
-      .attr('stroke-dasharray', (lvl) => (lvl === 100 ? 'none' : '3,3'));
-
-    const ringLabels = gridGroup
-      .selectAll<SVGTextElement, number>('text.radar-ring-label')
-      .data(ringLevels);
-    ringLabels
-      .join('text')
-      .attr('class', 'radar-ring-label')
-      .attr('x', cx + 5)
-      .attr('y', (lvl) => cy - rScale(lvl) + 11)
-      .attr('fill', 'var(--text-muted)')
-      .attr('font-size', '9px')
-      .attr('font-family', 'var(--font-mono)')
-      .text((lvl) => `${lvl}`);
-
-    // 2. Radial axis spokes
-    const spokes = axesGroup
-      .selectAll<SVGLineElement, RadarMetricAxis>('line.radar-spoke')
-      .data(axes, (d) => d.id);
-    spokes
-      .join('line')
-      .attr('class', 'radar-spoke')
-      .attr('x1', cx)
-      .attr('y1', cy)
-      .attr('x2', (_, i) => polarPoint(100, i)[0])
-      .attr('y2', (_, i) => polarPoint(100, i)[1])
-      .attr('stroke', (d) =>
-        d.id === highlightedId ? 'var(--accent-primary)' : 'var(--border-card)'
-      )
-      .attr('stroke-width', (d) => (d.id === highlightedId ? 2 : 1));
-
-    // 3. Before & After radar polygons
-    const lineGenerator = d3
-      .lineRadial<number>()
-      .curve(d3.curveLinearClosed)
-      .radius((d) => rScale(d))
-      .angle((_, i) => i * angleSlice);
-
-    const beforeValues = axes.map((a) => a.before);
-    const afterValues = axes.map((a) => a.after);
-
-    let beforePath = areaGroup.select<SVGPathElement>('path.radar-poly-before');
-    if (beforePath.empty()) {
-      beforePath = areaGroup
-        .append('path')
-        .attr('class', 'radar-poly-before')
-        .attr('transform', `translate(${cx}, ${cy})`)
-        .attr('fill', 'rgba(148, 163, 184, 0.16)')
-        .attr('stroke', 'var(--text-muted)')
-        .attr('stroke-width', 1.75)
-        .attr('stroke-dasharray', '5,4');
-    }
-    beforePath
-      .transition()
-      .duration(360)
-      .ease(d3.easeCubicOut)
-      .attr('transform', `translate(${cx}, ${cy})`)
-      .attr('d', lineGenerator(beforeValues) ?? '');
-
-    let afterPath = areaGroup.select<SVGPathElement>('path.radar-poly-after');
-    if (afterPath.empty()) {
-      afterPath = areaGroup
-        .append('path')
-        .attr('class', 'radar-poly-after')
-        .attr('transform', `translate(${cx}, ${cy})`)
-        .attr('fill', 'var(--accent-soft)')
-        .attr('stroke', 'var(--accent-primary)')
-        .attr('stroke-width', 2.6);
-    }
-    afterPath
-      .transition()
-      .duration(420)
-      .ease(d3.easeCubicOut)
-      .attr('transform', `translate(${cx}, ${cy})`)
-      .attr('d', lineGenerator(afterValues) ?? '');
-
-    // 4. Vertex dots for Before & After
-    const beforeDots = dotsGroup
-      .selectAll<SVGCircleElement, RadarMetricAxis>('circle.radar-dot-before')
-      .data(axes, (d) => d.id);
-    beforeDots
-      .join('circle')
-      .attr('class', 'radar-dot-before')
-      .attr('r', 3.5)
-      .attr('fill', 'var(--bg-card)')
-      .attr('stroke', 'var(--text-muted)')
-      .attr('stroke-width', 1.6)
-      .transition()
-      .duration(360)
-      .attr('cx', (d, i) => polarPoint(d.before, i)[0])
-      .attr('cy', (d, i) => polarPoint(d.before, i)[1]);
-
-    const afterDots = dotsGroup
-      .selectAll<SVGCircleElement, RadarMetricAxis>('circle.radar-dot-after')
-      .data(axes, (d) => d.id);
-    afterDots
-      .join('circle')
-      .attr('class', 'radar-dot-after')
-      .style('cursor', 'pointer')
-      .attr('fill', 'var(--accent-primary)')
-      .attr('stroke', 'var(--bg-card)')
-      .attr('stroke-width', 1.8)
-      .on('mouseenter', (_, d) => this.hoveredAxisId.set(d.id))
-      .on('mouseleave', () => this.hoveredAxisId.set(null))
-      .transition()
-      .duration(420)
-      .ease(d3.easeCubicOut)
-      .attr('r', (d) => (d.id === highlightedId ? 6.5 : 4.8))
-      .attr('cx', (d, i) => polarPoint(d.after, i)[0])
-      .attr('cy', (d, i) => polarPoint(d.after, i)[1]);
-
-    // 5. Perimeter Axis Labels
-    const labelPoints = axes.map((axis, i) => {
-      const [lx, ly] = polarPoint(123, i);
-      const angleDeg = ((i * angleSlice - Math.PI / 2) * 180) / Math.PI;
-      let anchor = 'middle';
-      if (Math.cos((angleDeg * Math.PI) / 180) > 0.25) anchor = 'start';
-      else if (Math.cos((angleDeg * Math.PI) / 180) < -0.25) anchor = 'end';
-      return { axis, lx, ly, anchor };
-    });
-
-    const axisLabels = labelsGroup
-      .selectAll<SVGTextElement, (typeof labelPoints)[number]>('text.radar-axis-label')
-      .data(labelPoints, (d) => d.axis.id);
-
-    axisLabels
-      .join('text')
-      .attr('class', 'radar-axis-label')
-      .style('cursor', 'pointer')
-      .attr('x', (d) => d.lx)
-      .attr('y', (d) => d.ly + 4)
-      .attr('text-anchor', (d) => d.anchor)
-      .attr('fill', (d) =>
-        d.axis.id === highlightedId ? 'var(--accent-primary)' : 'var(--text-main)'
-      )
-      .attr('font-size', '11px')
-      .attr('font-weight', (d) => (d.axis.id === highlightedId ? '700' : '600'))
-      .attr('font-family', 'var(--font-sans)')
-      .text((d) => `${d.axis.shortLabel} (${d.axis.after})`)
-      .on('mouseenter', (_, d) => this.hoveredAxisId.set(d.axis.id))
-      .on('mouseleave', () => this.hoveredAxisId.set(null));
+    this.reactRoot.render(radarElement);
   }
 }

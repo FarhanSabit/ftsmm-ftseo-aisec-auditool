@@ -1,7 +1,6 @@
 import { Injectable, computed, signal } from '@angular/core';
 import {
   GithubAuthProvider,
-  GoogleAuthProvider,
   User,
   onAuthStateChanged,
   signInWithPopup,
@@ -23,9 +22,12 @@ import {
 } from 'firebase/firestore';
 import {
   FIREBASE_AUTH_DOMAIN,
+  FIREBASE_FIRESTORE_DATABASE_ID,
   FIREBASE_PROJECT_ID,
   OperationType,
   auth,
+  createGithubOAuthProvider,
+  createGoogleOAuthProvider,
   db,
   handleFirestoreError,
 } from '../firebase.config';
@@ -36,6 +38,7 @@ import {
   AuditRunPhase,
   AuditSession,
   SavedAuditHistoryRecord,
+  UserSessionState,
 } from '../models/audit.model';
 
 @Injectable({ providedIn: 'root' })
@@ -43,6 +46,7 @@ export class FirebaseAuthService {
   readonly currentUser = signal<User | null>(null);
   readonly isAuthReady = signal<boolean>(false);
   readonly isSigningIn = signal<boolean>(false);
+  readonly githubAccessToken = signal<string | null>(null);
   readonly authError = signal<string | null>(null);
   readonly showGithubSetupModal = signal<boolean>(false);
   readonly isHistoryDrawerOpen = signal<boolean>(false);
@@ -52,6 +56,7 @@ export class FirebaseAuthService {
 
   readonly projectId = FIREBASE_PROJECT_ID;
   readonly authDomain = FIREBASE_AUTH_DOMAIN;
+  readonly firestoreDatabaseId = FIREBASE_FIRESTORE_DATABASE_ID;
   readonly firebaseProvidersConsoleUrl = `https://console.firebase.google.com/project/${FIREBASE_PROJECT_ID}/authentication/providers`;
   readonly githubCallbackUrl = `https://${FIREBASE_AUTH_DOMAIN}/__/auth/handler`;
 
@@ -70,7 +75,41 @@ export class FirebaseAuthService {
     return isGithub ? 'GitHub' : 'Google';
   });
 
-  private auditsUnsubscribe: Unsubscribe | null = null;
+  /**
+   * Reactive user session state derived from Firebase Authentication (GitHub OAuth)
+   * and linked to the authenticated user's Firestore profile (/users/{uid}).
+   */
+  readonly userSession = computed<UserSessionState>(() => {
+    const u = this.currentUser();
+    const isGithub = u?.providerData?.some((p) => p.providerId === 'github.com') ?? false;
+    const providerId: 'github.com' | 'google.com' | null = u
+      ? isGithub
+        ? 'github.com'
+        : 'google.com'
+      : null;
+    const sanitizedUid = u ? this.sanitizeId(u.uid) : null;
+
+    return {
+      isAuthenticated: u !== null,
+      isAuthReady: this.isAuthReady(),
+      uid: sanitizedUid,
+      displayName: u ? u.displayName || u.email?.split('@')[0] || 'GitHub Developer' : null,
+      githubUsername: u && isGithub ? u.displayName || u.email?.split('@')[0] || null : null,
+      photoURL: u?.photoURL ?? null,
+      providerId,
+      githubAccessToken: this.githubAccessToken(),
+      projectId: this.projectId,
+      authDomain: this.authDomain,
+      firestoreDatabaseId: this.firestoreDatabaseId,
+      profilePath: sanitizedUid ? `users/${sanitizedUid}` : null,
+      savedAuditsCount: this.savedAudits().length,
+    };
+  });
+
+  private profileAuditsUnsubscribe: Unsubscribe | null = null;
+  private topLevelAuditsUnsubscribe: Unsubscribe | null = null;
+  private profileAuditMap = new Map<string, SavedAuditHistoryRecord>();
+  private topLevelAuditMap = new Map<string, SavedAuditHistoryRecord>();
 
   constructor() {
     if (typeof window !== 'undefined') {
@@ -85,6 +124,7 @@ export class FirebaseAuthService {
           }
           this.subscribeToUserAudits(user.uid);
         } else {
+          this.githubAccessToken.set(null);
           this.unsubscribeFromUserAudits();
           this.savedAudits.set([]);
         }
@@ -111,9 +151,12 @@ export class FirebaseAuthService {
     this.isSigningIn.set(true);
     this.authError.set(null);
     try {
-      const provider = new GithubAuthProvider();
-      provider.addScope('read:user');
-      await signInWithPopup(auth, provider);
+      const provider = createGithubOAuthProvider();
+      const result = await signInWithPopup(auth, provider);
+      const credential = GithubAuthProvider.credentialFromResult(result);
+      if (credential?.accessToken) {
+        this.githubAccessToken.set(credential.accessToken);
+      }
       this.showGithubSetupModal.set(false);
     } catch (err: unknown) {
       const code =
@@ -143,7 +186,7 @@ export class FirebaseAuthService {
     this.isSigningIn.set(true);
     this.authError.set(null);
     try {
-      const provider = new GoogleAuthProvider();
+      const provider = createGoogleOAuthProvider();
       await signInWithPopup(auth, provider);
       this.showGithubSetupModal.set(false);
     } catch (err: unknown) {
@@ -163,12 +206,27 @@ export class FirebaseAuthService {
   async signOutUser(): Promise<void> {
     this.unsubscribeFromUserAudits();
     await signOut(auth);
+    this.githubAccessToken.set(null);
     this.savedAudits.set([]);
     this.isHistoryDrawerOpen.set(false);
   }
 
   toggleHistoryDrawer(): void {
     this.isHistoryDrawerOpen.set(!this.isHistoryDrawerOpen());
+  }
+
+  /**
+   * Header GitHub Login / Profile History action:
+   * Checks current Firebase auth state; if authenticated, opens/toggles the user's
+   * profile saved audit history drawer. If unauthenticated, initiates GitHub OAuth sign-in.
+   */
+  async handleGithubAuthOrProfileHistory(): Promise<void> {
+    const session = this.userSession();
+    if (session.isAuthenticated && this.currentUser()) {
+      this.toggleHistoryDrawer();
+      return;
+    }
+    await this.signInWithGitHub();
   }
 
   openGithubSetupGuide(): void {
@@ -247,49 +305,91 @@ export class FirebaseAuthService {
     }
   }
 
+  private parseAuditSnapshotDoc(
+    docId: string,
+    data: Record<string, unknown>,
+    sanitizedUid: string
+  ): SavedAuditHistoryRecord {
+    const createdTs = data['createdAt'] as Timestamp | null | undefined;
+    const updatedTs = data['updatedAt'] as Timestamp | null | undefined;
+    return {
+      auditId: String(data['auditId'] || docId),
+      ownerId: String(data['ownerId'] || sanitizedUid),
+      repoFullName: String(data['repoFullName'] || 'owner/repository'),
+      repoUrl: String(data['repoUrl'] || 'https://github.com/owner/repository'),
+      runPhase: (data['runPhase'] === 'lhr' ? 'lhr' : 'static') as AuditRunPhase,
+      mode: (data['mode'] === 'demo' ? 'demo' : 'live') as AuditMode,
+      totalCommitsCount: Number(data['totalCommitsCount'] ?? 0),
+      selectedCommitsCount: Number(data['selectedCommitsCount'] ?? 0),
+      performanceBefore: Number(data['performanceBefore'] ?? 64),
+      performanceAfter: Number(data['performanceAfter'] ?? 92),
+      accessibilityBefore: Number(data['accessibilityBefore'] ?? 70),
+      accessibilityAfter: Number(data['accessibilityAfter'] ?? 95),
+      bestPracticesBefore: Number(data['bestPracticesBefore'] ?? 76),
+      bestPracticesAfter: Number(data['bestPracticesAfter'] ?? 94),
+      seoBefore: Number(data['seoBefore'] ?? 80),
+      seoAfter: Number(data['seoAfter'] ?? 96),
+      securityBefore: Number(data['securityBefore'] ?? 72),
+      securityAfter: Number(data['securityAfter'] ?? 92),
+      summaryNotes: String(data['summaryNotes'] || ''),
+      commitTitles: Array.isArray(data['commitTitles'])
+        ? (data['commitTitles'] as unknown[]).map((c) => String(c))
+        : [],
+      createdAtIso: createdTs?.toDate ? createdTs.toDate().toISOString() : new Date().toISOString(),
+      updatedAtIso: updatedTs?.toDate ? updatedTs.toDate().toISOString() : new Date().toISOString(),
+    };
+  }
+
+  private syncCombinedAudits(): void {
+    const merged = new Map<string, SavedAuditHistoryRecord>();
+    for (const [id, rec] of this.topLevelAuditMap.entries()) {
+      merged.set(id, rec);
+    }
+    for (const [id, rec] of this.profileAuditMap.entries()) {
+      merged.set(id, rec);
+    }
+    const items = Array.from(merged.values());
+    items.sort((a, b) => b.updatedAtIso.localeCompare(a.updatedAtIso));
+    this.savedAudits.set(items);
+  }
+
   private subscribeToUserAudits(uid: string): void {
     this.unsubscribeFromUserAudits();
     const sanitizedUid = this.sanitizeId(uid);
-    const auditsQuery = query(collection(db, 'audits'), where('ownerId', '==', sanitizedUid));
 
-    this.auditsUnsubscribe = onSnapshot(
+    // 1. Subscribe to the user's Firestore profile subcollection (/users/{uid}/audits)
+    const profileAuditsPath = `users/${sanitizedUid}/audits`;
+    const profileAuditsQuery = query(
+      collection(db, 'users', sanitizedUid, 'audits'),
+      where('ownerId', '==', sanitizedUid)
+    );
+
+    this.profileAuditsUnsubscribe = onSnapshot(
+      profileAuditsQuery,
+      (snapshot) => {
+        this.profileAuditMap.clear();
+        snapshot.forEach((docSnap) => {
+          const rec = this.parseAuditSnapshotDoc(docSnap.id, docSnap.data(), sanitizedUid);
+          this.profileAuditMap.set(rec.auditId, rec);
+        });
+        this.syncCombinedAudits();
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.LIST, profileAuditsPath);
+      }
+    );
+
+    // 2. Also subscribe to top-level /audits filtered by ownerId
+    const auditsQuery = query(collection(db, 'audits'), where('ownerId', '==', sanitizedUid));
+    this.topLevelAuditsUnsubscribe = onSnapshot(
       auditsQuery,
       (snapshot) => {
-        const items: SavedAuditHistoryRecord[] = [];
+        this.topLevelAuditMap.clear();
         snapshot.forEach((docSnap) => {
-          const data = docSnap.data();
-          const createdTs = data['createdAt'] as Timestamp | null | undefined;
-          const updatedTs = data['updatedAt'] as Timestamp | null | undefined;
-          items.push({
-            auditId: String(data['auditId'] || docSnap.id),
-            ownerId: String(data['ownerId'] || sanitizedUid),
-            repoFullName: String(data['repoFullName'] || 'owner/repository'),
-            repoUrl: String(data['repoUrl'] || 'https://github.com/owner/repository'),
-            runPhase: (data['runPhase'] === 'lhr' ? 'lhr' : 'static') as AuditRunPhase,
-            mode: (data['mode'] === 'demo' ? 'demo' : 'live') as AuditMode,
-            totalCommitsCount: Number(data['totalCommitsCount'] ?? 0),
-            selectedCommitsCount: Number(data['selectedCommitsCount'] ?? 0),
-            performanceBefore: Number(data['performanceBefore'] ?? 64),
-            performanceAfter: Number(data['performanceAfter'] ?? 92),
-            accessibilityBefore: Number(data['accessibilityBefore'] ?? 70),
-            accessibilityAfter: Number(data['accessibilityAfter'] ?? 95),
-            bestPracticesBefore: Number(data['bestPracticesBefore'] ?? 76),
-            bestPracticesAfter: Number(data['bestPracticesAfter'] ?? 94),
-            seoBefore: Number(data['seoBefore'] ?? 80),
-            seoAfter: Number(data['seoAfter'] ?? 96),
-            securityBefore: Number(data['securityBefore'] ?? 72),
-            securityAfter: Number(data['securityAfter'] ?? 92),
-            summaryNotes: String(data['summaryNotes'] || ''),
-            commitTitles: Array.isArray(data['commitTitles'])
-              ? (data['commitTitles'] as unknown[]).map((c) => String(c))
-              : [],
-            createdAtIso: createdTs?.toDate ? createdTs.toDate().toISOString() : new Date().toISOString(),
-            updatedAtIso: updatedTs?.toDate ? updatedTs.toDate().toISOString() : new Date().toISOString(),
-          });
+          const rec = this.parseAuditSnapshotDoc(docSnap.id, docSnap.data(), sanitizedUid);
+          this.topLevelAuditMap.set(rec.auditId, rec);
         });
-
-        items.sort((a, b) => b.updatedAtIso.localeCompare(a.updatedAtIso));
-        this.savedAudits.set(items);
+        this.syncCombinedAudits();
       },
       (error) => {
         handleFirestoreError(error, OperationType.LIST, 'audits');
@@ -298,10 +398,16 @@ export class FirebaseAuthService {
   }
 
   private unsubscribeFromUserAudits(): void {
-    if (this.auditsUnsubscribe) {
-      this.auditsUnsubscribe();
-      this.auditsUnsubscribe = null;
+    if (this.profileAuditsUnsubscribe) {
+      this.profileAuditsUnsubscribe();
+      this.profileAuditsUnsubscribe = null;
     }
+    if (this.topLevelAuditsUnsubscribe) {
+      this.topLevelAuditsUnsubscribe();
+      this.topLevelAuditsUnsubscribe = null;
+    }
+    this.profileAuditMap.clear();
+    this.topLevelAuditMap.clear();
   }
 
   async saveAuditToAccount(
@@ -320,14 +426,18 @@ export class FirebaseAuthService {
 
     const ownerId = this.sanitizeId(user.uid);
     const auditId = this.sanitizeId(`${ownerId}_${session.id}_${session.runPhase}`);
-    const auditPath = `audits/${auditId}`;
-    const auditRef = doc(db, 'audits', auditId);
+    const profileAuditPath = `users/${ownerId}/audits/${auditId}`;
+    const topLevelAuditPath = `audits/${auditId}`;
+
+    const profileAuditRef = doc(db, 'users', ownerId, 'audits', auditId);
+    const topLevelAuditRef = doc(db, 'audits', auditId);
 
     const commitTitles = selectedCommits
       .slice(0, 25)
       .map((c) => this.truncate(c.title, 240, 'Atomic audit commit'));
 
-    const perfGain = this.clampMetric(impact.performanceAfter) - this.clampMetric(impact.performanceBefore);
+    const perfGain =
+      this.clampMetric(impact.performanceAfter) - this.clampMetric(impact.performanceBefore);
     const a11yGain =
       this.clampMetric(impact.accessibilityAfter) - this.clampMetric(impact.accessibilityBefore);
 
@@ -337,71 +447,91 @@ export class FirebaseAuthService {
       'Saved code audit snapshot'
     );
 
+    const createPayload = {
+      auditId,
+      ownerId,
+      repoFullName: this.truncate(session.repo.fullName, 200, 'owner/repository'),
+      repoUrl: this.truncate(
+        session.repo.url || `https://github.com/${session.repo.fullName}`,
+        500,
+        'https://github.com/owner/repository'
+      ),
+      runPhase: session.runPhase === 'lhr' ? 'lhr' : 'static',
+      mode: session.mode === 'demo' ? 'demo' : 'live',
+      totalCommitsCount: Math.max(0, Math.min(100, session.commits.length)),
+      selectedCommitsCount: Math.max(0, Math.min(100, selectedCommits.length)),
+      performanceBefore: this.clampMetric(impact.performanceBefore),
+      performanceAfter: this.clampMetric(impact.performanceAfter),
+      accessibilityBefore: this.clampMetric(impact.accessibilityBefore),
+      accessibilityAfter: this.clampMetric(impact.accessibilityAfter),
+      bestPracticesBefore: this.clampMetric(impact.bestPracticesBefore),
+      bestPracticesAfter: this.clampMetric(impact.bestPracticesAfter),
+      seoBefore: this.clampMetric(impact.seoBefore),
+      seoAfter: this.clampMetric(impact.seoAfter),
+      securityBefore: this.clampMetric(impact.securityBefore),
+      securityAfter: this.clampMetric(impact.securityAfter),
+      summaryNotes,
+      commitTitles,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+
+    const updatePayload = {
+      selectedCommitsCount: Math.max(0, Math.min(100, selectedCommits.length)),
+      performanceAfter: this.clampMetric(impact.performanceAfter),
+      accessibilityAfter: this.clampMetric(impact.accessibilityAfter),
+      bestPracticesAfter: this.clampMetric(impact.bestPracticesAfter),
+      seoAfter: this.clampMetric(impact.seoAfter),
+      securityAfter: this.clampMetric(impact.securityAfter),
+      summaryNotes,
+      commitTitles,
+      updatedAt: serverTimestamp(),
+    };
+
     try {
       await this.ensureUserProfileDocument(user);
 
-      const existingSnap = await getDoc(auditRef);
-      if (!existingSnap.exists()) {
-        await setDoc(auditRef, {
-          auditId,
-          ownerId,
-          repoFullName: this.truncate(session.repo.fullName, 200, 'owner/repository'),
-          repoUrl: this.truncate(
-            session.repo.url || `https://github.com/${session.repo.fullName}`,
-            500,
-            'https://github.com/owner/repository'
-          ),
-          runPhase: session.runPhase === 'lhr' ? 'lhr' : 'static',
-          mode: session.mode === 'demo' ? 'demo' : 'live',
-          totalCommitsCount: Math.max(0, Math.min(100, session.commits.length)),
-          selectedCommitsCount: Math.max(0, Math.min(100, selectedCommits.length)),
-          performanceBefore: this.clampMetric(impact.performanceBefore),
-          performanceAfter: this.clampMetric(impact.performanceAfter),
-          accessibilityBefore: this.clampMetric(impact.accessibilityBefore),
-          accessibilityAfter: this.clampMetric(impact.accessibilityAfter),
-          bestPracticesBefore: this.clampMetric(impact.bestPracticesBefore),
-          bestPracticesAfter: this.clampMetric(impact.bestPracticesAfter),
-          seoBefore: this.clampMetric(impact.seoBefore),
-          seoAfter: this.clampMetric(impact.seoAfter),
-          securityBefore: this.clampMetric(impact.securityBefore),
-          securityAfter: this.clampMetric(impact.securityAfter),
-          summaryNotes,
-          commitTitles,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
+      // Save to authenticated user's Firestore profile subcollection (/users/{uid}/audits/{auditId})
+      const existingProfileSnap = await getDoc(profileAuditRef);
+      if (!existingProfileSnap.exists()) {
+        await setDoc(profileAuditRef, createPayload);
       } else {
-        await updateDoc(auditRef, {
-          selectedCommitsCount: Math.max(0, Math.min(100, selectedCommits.length)),
-          performanceAfter: this.clampMetric(impact.performanceAfter),
-          accessibilityAfter: this.clampMetric(impact.accessibilityAfter),
-          bestPracticesAfter: this.clampMetric(impact.bestPracticesAfter),
-          seoAfter: this.clampMetric(impact.seoAfter),
-          securityAfter: this.clampMetric(impact.securityAfter),
-          summaryNotes,
-          commitTitles,
-          updatedAt: serverTimestamp(),
-        });
+        await updateDoc(profileAuditRef, updatePayload);
       }
 
-      this.saveSuccessBanner.set(`Saved ${session.repo.fullName} to your account history`);
+      // Synchronize with top-level /audits/{auditId}
+      const existingTopSnap = await getDoc(topLevelAuditRef);
+      if (!existingTopSnap.exists()) {
+        await setDoc(topLevelAuditRef, createPayload);
+      } else {
+        await updateDoc(topLevelAuditRef, updatePayload);
+      }
+
+      this.saveSuccessBanner.set(
+        `Saved ${session.repo.fullName} to your Firestore profile (${this.userDisplayLabel()})`
+      );
       setTimeout(() => {
         this.saveSuccessBanner.set(null);
       }, 3200);
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, auditPath);
+      handleFirestoreError(error, OperationType.WRITE, `${profileAuditPath} | ${topLevelAuditPath}`);
     } finally {
       this.isSavingAudit.set(false);
     }
   }
 
   async deleteSavedAudit(auditId: string): Promise<void> {
+    const user = this.currentUser();
     const cleanId = this.sanitizeId(auditId);
-    const path = `audits/${cleanId}`;
+    const topPath = `audits/${cleanId}`;
     try {
+      if (user) {
+        const ownerId = this.sanitizeId(user.uid);
+        await deleteDoc(doc(db, 'users', ownerId, 'audits', cleanId));
+      }
       await deleteDoc(doc(db, 'audits', cleanId));
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, path);
+      handleFirestoreError(error, OperationType.DELETE, topPath);
     }
   }
 }

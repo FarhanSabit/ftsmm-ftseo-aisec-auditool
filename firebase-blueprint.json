@@ -230,6 +230,12 @@
       },
       "description": "Isolated PII subcollection storing private user email."
     },
+    "/users/{userId}/audits/{auditId}": {
+      "schema": {
+        "$ref": "#/entities/AuditHistoryRecord"
+      },
+      "description": "Saved audit history subcollection stored directly under the authenticated user's Firestore profile."
+    },
     "/audits/{auditId}": {
       "schema": {
         "$ref": "#/entities/AuditHistoryRecord"
