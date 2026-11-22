@@ -34,9 +34,11 @@ export interface ComparableAuditRun {
   id: string;
   label: string;
   badge: string;
-  sourceType: 'current' | 'paired-run' | 'firestore';
+  significanceTag?: 'Initial Scan' | 'Latest Optimized';
+  sourceType: 'initial-baseline' | 'current' | 'paired-run' | 'firestore';
   repoFullName: string;
   runPhase: AuditRunPhase;
+  timestampIso?: string;
   timestampLabel: string;
   selectedCommitsCount: number;
   totalCommitsCount: number;
@@ -81,6 +83,7 @@ export interface MetricComparisonRow {
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section
+      id="run-compare-section"
       class="run-compare-card"
       [class.is-expanded]="isExpanded()"
       aria-labelledby="run-compare-heading"
@@ -92,16 +95,34 @@ export interface MetricComparisonRow {
             <span class="run-compare-count-pill">
               {{ availableRuns().length }} history runs available
             </span>
+            @if (isAutoComparedActive()) {
+              <span class="auto-compare-active-pill">
+                ⚡ Auto-Compare: Initial Scan vs. Latest Optimized
+              </span>
+            }
           </div>
           <h2 id="run-compare-heading" class="run-compare-card__title">
             Compare two audit runs side-by-side with Recharts radar charts
           </h2>
           <p class="run-compare-card__subtitle">
-            Select any two audit runs from your history (saved Firestore sessions, Run 1 Static Code Audit, or Run 2 Lighthouse JSON Audit) to visualize their before-vs-after Performance and Accessibility radar polygons side-by-side.
+            Select any two audit runs from your history—or click <strong>Auto-Compare</strong> to automatically pair the initial scan against the latest optimized version—and visualize their before-vs-after Performance and Accessibility radar polygons side-by-side.
           </p>
         </div>
 
         <div class="run-compare-card__header-actions">
+          <button
+            type="button"
+            id="comparison-auto-compare-btn"
+            class="export-pill-btn export-pill-btn--primary"
+            (click)="runAutoCompare()"
+            title="Identify the initial scan and latest optimized version and compare them side-by-side"
+          >
+            <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+              <path d="M9.8 2.2L4.2 10h4.6l-.6 5.8 5.6-7.8H9.2l.6-5.8z" stroke-linejoin="round" />
+            </svg>
+            <span>Auto-Compare (Initial vs. Latest)</span>
+          </button>
+
           @if (isExpanded()) {
             <button
               type="button"
@@ -135,12 +156,33 @@ export interface MetricComparisonRow {
 
       @if (isExpanded()) {
         <div id="run-compare-panel-body" class="run-compare-body">
+          @if (autoCompareNotice(); as notice) {
+            <div class="auto-compare-banner" role="status" aria-live="polite">
+              <div class="auto-compare-banner__main">
+                <span class="auto-compare-banner__badge">Auto-Compare Active</span>
+                <span class="auto-compare-banner__text">{{ notice }}</span>
+              </div>
+              <button
+                type="button"
+                class="text-action-btn"
+                (click)="dismissAutoCompareNotice()"
+              >
+                Dismiss
+              </button>
+            </div>
+          }
+
           <!-- Two Run Selectors (Run A & Run B) -->
           <div class="run-selectors-grid">
             <!-- Run A Selector -->
             <div class="run-selector-box run-selector-box--a">
               <div class="run-selector-box__top">
-                <span class="run-slot-badge run-slot-badge--a">Audit Run A · Left Radar</span>
+                <div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">
+                  <span class="run-slot-badge run-slot-badge--a">Audit Run A · Left Radar</span>
+                  @if (runA()?.significanceTag; as sigA) {
+                    <span class="d3-significance-pill d3-significance-pill--initial">{{ sigA }}</span>
+                  }
+                </div>
                 @if (runA(); as a) {
                   <span class="run-source-tag">{{ a.badge }}</span>
                 }
@@ -172,7 +214,12 @@ export interface MetricComparisonRow {
             <!-- Run B Selector -->
             <div class="run-selector-box run-selector-box--b">
               <div class="run-selector-box__top">
-                <span class="run-slot-badge run-slot-badge--b">Audit Run B · Right Radar</span>
+                <div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">
+                  <span class="run-slot-badge run-slot-badge--b">Audit Run B · Right Radar</span>
+                  @if (runB()?.significanceTag; as sigB) {
+                    <span class="d3-significance-pill d3-significance-pill--latest">{{ sigB }}</span>
+                  }
+                </div>
                 @if (runB(); as b) {
                   <span class="run-source-tag run-source-tag--accent">{{ b.badge }}</span>
                 }
@@ -221,7 +268,12 @@ export interface MetricComparisonRow {
               <div class="compare-radar-panel compare-radar-panel--a">
                 <div class="compare-radar-panel__head">
                   <div>
-                    <span class="run-slot-badge run-slot-badge--a">Audit Run A</span>
+                    <div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">
+                      <span class="run-slot-badge run-slot-badge--a">Audit Run A</span>
+                      @if (a.significanceTag) {
+                        <span class="d3-significance-pill d3-significance-pill--initial">{{ a.significanceTag }}</span>
+                      }
+                    </div>
                     <h3 class="compare-radar-panel__title">{{ a.label }}</h3>
                     <span class="compare-radar-panel__sub">
                       {{ a.repoFullName }} · {{ a.selectedCommitsCount }}/{{ a.totalCommitsCount }} commits · {{ a.timestampLabel }}
@@ -249,7 +301,12 @@ export interface MetricComparisonRow {
               <div class="compare-radar-panel compare-radar-panel--b">
                 <div class="compare-radar-panel__head">
                   <div>
-                    <span class="run-slot-badge run-slot-badge--b">Audit Run B</span>
+                    <div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">
+                      <span class="run-slot-badge run-slot-badge--b">Audit Run B</span>
+                      @if (b.significanceTag) {
+                        <span class="d3-significance-pill d3-significance-pill--latest">{{ b.significanceTag }}</span>
+                      }
+                    </div>
                     <h3 class="compare-radar-panel__title">{{ b.label }}</h3>
                     <span class="compare-radar-panel__sub">
                       {{ b.repoFullName }} · {{ b.selectedCommitsCount }}/{{ b.totalCommitsCount }} commits · {{ b.timestampLabel }}
@@ -456,8 +513,10 @@ export class AuditRunComparisonComponent implements AfterViewInit, OnDestroy {
   readonly totalCommitsCount = input.required<number>();
   readonly savedAudits = input<SavedAuditHistoryRecord[]>([]);
   readonly isExpanded = input<boolean>(false);
+  readonly autoCompareNonce = input<number>(0);
 
   readonly toggleExpanded = output<void>();
+  readonly requestExpand = output<void>();
 
   @ViewChild('radarHostA')
   private radarHostA?: ElementRef<HTMLDivElement>;
@@ -468,16 +527,19 @@ export class AuditRunComparisonComponent implements AfterViewInit, OnDestroy {
   private reactRootA: Root | null = null;
   private reactRootB: Root | null = null;
   private isViewReady = false;
+  private lastHandledNonce = 0;
   private readonly animCycle = signal<number>(1);
 
   readonly selectedRunAId = signal<string>('');
   readonly selectedRunBId = signal<string>('');
+  readonly isAutoComparedActive = signal<boolean>(false);
+  readonly autoCompareNotice = signal<string | null>(null);
 
   /**
    * Builds the list of selectable audit runs combining:
-   * 1. Current live session on the report page
-   * 2. Complementary Run 1 (Static Code Audit) / Run 2 (Lighthouse JSON LHR) benchmark pass for the current repo
-   * 3. Partial commit selection baseline snapshot
+   * 1. Initial Scan · Unpatched / Early Static Baseline Pass
+   * 2. Current live session on the report page (Latest Optimized Version)
+   * 3. Complementary Run 1 (Static Code Audit) / Run 2 (Lighthouse JSON LHR) benchmark pass
    * 4. All user-saved audit runs fetched from Firestore
    */
   readonly availableRuns = computed<ComparableAuditRun[]>(() => {
@@ -502,16 +564,48 @@ export class AuditRunComparisonComponent implements AfterViewInit, OnDestroy {
 
     const isCurrentLhr = session.runPhase === 'lhr';
 
+    // Initial Scan option (representing the initial scan state)
+    const initialScanRun: ComparableAuditRun = {
+      id: 'initial-scan-baseline',
+      label: 'Initial Scan · Unpatched Repository Baseline (Run 0)',
+      badge: 'Initial Scan · Baseline',
+      significanceTag: 'Initial Scan',
+      sourceType: 'initial-baseline',
+      repoFullName: session.repo.fullName,
+      runPhase: 'static',
+      timestampLabel: 'Initial scan',
+      selectedCommitsCount: 0,
+      totalCommitsCount: totCount,
+      performanceBefore: metrics.performanceBefore,
+      performanceAfter: metrics.performanceBefore + 6,
+      accessibilityBefore: metrics.accessibilityBefore,
+      accessibilityAfter: metrics.accessibilityBefore + 6,
+      bestPracticesBefore: metrics.bestPracticesBefore,
+      bestPracticesAfter: metrics.bestPracticesBefore + 4,
+      seoBefore: metrics.seoBefore,
+      seoAfter: metrics.seoBefore + 4,
+      lcpBefore: lcp.before,
+      lcpAfter: lcp.before + 7,
+      clsBefore: cls.before,
+      clsAfter: cls.before + 6,
+      fidBefore: fid.before,
+      fidAfter: fid.before + 5,
+      wcagAriaBefore: wcag.before,
+      wcagAriaAfter: wcag.before + 6,
+      summaryNotes: 'Initial repository scan before atomic Core Web Vitals and WCAG remediation commits.',
+    };
+
     const currentRun: ComparableAuditRun = {
       id: `current-active-${session.runPhase}`,
       label: isCurrentLhr
-        ? 'Current Session · Run 2 (Lighthouse JSON Audit)'
+        ? 'Latest Optimized · Run 2 (Lighthouse JSON Audit)'
         : 'Current Session · Run 1 (Static Code Audit)',
       badge: isCurrentLhr ? 'Active Run 2 · LHR JSON' : 'Active Run 1 · Static',
+      significanceTag: 'Latest Optimized',
       sourceType: 'current',
       repoFullName: session.repo.fullName,
       runPhase: session.runPhase,
-      timestampLabel: 'Live session',
+      timestampLabel: 'Latest optimized session',
       selectedCommitsCount: selCount,
       totalCommitsCount: totCount,
       performanceBefore: metrics.performanceBefore,
@@ -533,7 +627,6 @@ export class AuditRunComparisonComponent implements AfterViewInit, OnDestroy {
       summaryNotes: `Active report selection (${selCount} of ${totCount} atomic commits enabled).`,
     };
 
-    // Paired complementary pass (Run 2 LHR JSON if currently in Run 1 Static, or Run 1 Static if currently in Run 2 LHR)
     const complementaryRun: ComparableAuditRun = isCurrentLhr
       ? {
           id: 'paired-run-1-static',
@@ -565,8 +658,9 @@ export class AuditRunComparisonComponent implements AfterViewInit, OnDestroy {
         }
       : {
           id: 'paired-run-2-lhr',
-          label: 'Run 2 · Lighthouse Result (LHR) JSON Targeted Audit',
+          label: 'Run 2 · Lighthouse Result (LHR) JSON Targeted Audit (Latest Optimized)',
           badge: 'Run 2 · LHR JSON',
+          significanceTag: 'Latest Optimized',
           sourceType: 'paired-run',
           repoFullName: session.repo.fullName,
           runPhase: 'lhr',
@@ -592,7 +686,6 @@ export class AuditRunComparisonComponent implements AfterViewInit, OnDestroy {
           summaryNotes: 'Second-pass audit correlated with failing Lighthouse JSON DOM selectors and metricSavings.',
         };
 
-    // Conservative subset run (e.g. Core Web Vitals & WCAG critical-only commits)
     const conservativeSubsetRun: ComparableAuditRun = {
       id: 'paired-critical-subset',
       label: 'Conservative Patch · Critical LCP & WCAG Contrast Commits Only',
@@ -622,6 +715,16 @@ export class AuditRunComparisonComponent implements AfterViewInit, OnDestroy {
       summaryNotes: 'Minimal high-priority commit subset targeting only hero LCP and primary color contrast.',
     };
 
+    // Sort saved Firestore records chronologically to tag earliest (Initial Scan) & latest (Latest Optimized)
+    const sortedFirestore = [...saved].sort((a, b) =>
+      String(a.updatedAtIso || '').localeCompare(String(b.updatedAtIso || ''))
+    );
+    const earliestFsId = sortedFirestore.length >= 2 ? sortedFirestore[0].auditId : null;
+    const latestFsId =
+      sortedFirestore.length >= 1
+        ? sortedFirestore[sortedFirestore.length - 1].auditId
+        : null;
+
     const firestoreRuns: ComparableAuditRun[] = saved.map((rec, index) => {
       const perfGainRatio =
         rec.performanceAfter > rec.performanceBefore
@@ -641,13 +744,22 @@ export class AuditRunComparisonComponent implements AfterViewInit, OnDestroy {
           })
         : `Saved #${index + 1}`;
 
+      let significanceTag: ComparableAuditRun['significanceTag'];
+      if (rec.auditId === earliestFsId) {
+        significanceTag = 'Initial Scan';
+      } else if (rec.auditId === latestFsId) {
+        significanceTag = 'Latest Optimized';
+      }
+
       return {
         id: `firestore-${rec.auditId}`,
         label: `Saved Firestore Run · ${rec.repoFullName} (${rec.runPhase === 'lhr' ? 'Run 2 LHR' : 'Run 1 Static'} · ${shortDate})`,
         badge: `Firestore · ${rec.runPhase === 'lhr' ? 'Run 2 LHR' : 'Run 1 Static'}`,
+        significanceTag,
         sourceType: 'firestore',
         repoFullName: rec.repoFullName,
         runPhase: rec.runPhase,
+        timestampIso: rec.updatedAtIso,
         timestampLabel: shortDate,
         selectedCommitsCount: rec.selectedCommitsCount,
         totalCommitsCount: rec.totalCommitsCount,
@@ -671,7 +783,13 @@ export class AuditRunComparisonComponent implements AfterViewInit, OnDestroy {
       };
     });
 
-    return [currentRun, complementaryRun, conservativeSubsetRun, ...firestoreRuns];
+    return [
+      initialScanRun,
+      currentRun,
+      complementaryRun,
+      conservativeSubsetRun,
+      ...firestoreRuns,
+    ];
   });
 
   readonly runA = computed<ComparableAuditRun | null>(() => {
@@ -823,6 +941,15 @@ export class AuditRunComparisonComponent implements AfterViewInit, OnDestroy {
       }
     });
 
+    // React to external Auto-Compare requests from the History list / drawer / modal / tab
+    effect(() => {
+      const nonce = this.autoCompareNonce();
+      if (nonce > 0 && nonce !== this.lastHandledNonce) {
+        this.lastHandledNonce = nonce;
+        this.runAutoCompare(false);
+      }
+    });
+
     effect(() => {
       const expanded = this.isExpanded();
       const a = this.runA();
@@ -860,13 +987,115 @@ export class AuditRunComparisonComponent implements AfterViewInit, OnDestroy {
     }
   }
 
+  /**
+   * Automatically identifies the two most significant audit runs:
+   * - Run A: The initial scan (earliest Firestore snapshot or initial unpatched/static baseline scan)
+   * - Run B: The latest optimized version (most recent high-scoring Firestore snapshot or full optimized build)
+   * and opens them side-by-side in the comparison panel.
+   */
+  runAutoCompare(shouldEmitExpand = true): void {
+    const runs = this.availableRuns();
+    if (runs.length < 2) return;
+
+    const repoName = (this.currentSession()?.repo?.fullName || '').trim().toLowerCase();
+    const firestoreRuns = runs.filter((r) => r.sourceType === 'firestore');
+    const repoFirestoreRuns = firestoreRuns.filter(
+      (r) => (r.repoFullName || '').trim().toLowerCase() === repoName
+    );
+    const fsPool = repoFirestoreRuns.length >= 2 ? repoFirestoreRuns : firestoreRuns;
+
+    let initialRun: ComparableAuditRun;
+    let latestOptimizedRun: ComparableAuditRun;
+
+    if (fsPool.length >= 2) {
+      // Sort chronologically ascending; tie-break by total after score ascending
+      const sorted = [...fsPool].sort((x, y) => {
+        const cmp = String(x.timestampIso || '').localeCompare(String(y.timestampIso || ''));
+        if (cmp !== 0) return cmp;
+        return (
+          x.performanceAfter +
+          x.accessibilityAfter -
+          (y.performanceAfter + y.accessibilityAfter)
+        );
+      });
+      initialRun = sorted[0];
+      // Pick the latest/highest-optimized version among subsequent runs
+      const candidates = sorted.slice(1);
+      latestOptimizedRun = candidates.reduce((best, curr) =>
+        curr.performanceAfter + curr.accessibilityAfter >=
+        best.performanceAfter + best.accessibilityAfter
+          ? curr
+          : best
+      , candidates[candidates.length - 1]);
+    } else if (fsPool.length === 1) {
+      const singleFs = fsPool[0];
+      const baseRun =
+        runs.find((r) => r.id === 'initial-scan-baseline') ?? runs[0];
+      const bestLive =
+        runs.find((r) => r.id === 'paired-run-2-lhr') ??
+        runs.find((r) => r.sourceType === 'current') ??
+        runs[1];
+
+      if (
+        singleFs.performanceAfter + singleFs.accessibilityAfter >=
+        bestLive.performanceAfter + bestLive.accessibilityAfter
+      ) {
+        initialRun = baseRun;
+        latestOptimizedRun = singleFs;
+      } else {
+        initialRun = singleFs;
+        latestOptimizedRun = bestLive;
+      }
+    } else {
+      initialRun =
+        runs.find((r) => r.id === 'initial-scan-baseline') ??
+        runs.find((r) => r.id === 'paired-run-1-static') ??
+        runs[0];
+      latestOptimizedRun =
+        runs.find((r) => r.id === 'paired-run-2-lhr') ??
+        runs.find((r) => r.sourceType === 'current') ??
+        runs[1];
+    }
+
+    if (initialRun.id === latestOptimizedRun.id && runs.length >= 2) {
+      latestOptimizedRun = runs.find((r) => r.id !== initialRun.id) ?? runs[1];
+    }
+
+    this.selectedRunAId.set(initialRun.id);
+    this.selectedRunBId.set(latestOptimizedRun.id);
+    this.isAutoComparedActive.set(true);
+
+    const perfDelta =
+      latestOptimizedRun.performanceAfter - initialRun.performanceAfter;
+    const a11yDelta =
+      latestOptimizedRun.accessibilityAfter - initialRun.accessibilityAfter;
+    const lcpDelta = latestOptimizedRun.lcpAfter - initialRun.lcpAfter;
+    const clsDelta = latestOptimizedRun.clsAfter - initialRun.clsAfter;
+
+    this.autoCompareNotice.set(
+      `Paired Initial Scan (${initialRun.badge}) against Latest Optimized Version (${latestOptimizedRun.badge}) — Net improvement: +${Math.max(0, perfDelta)} Perf pts, +${Math.max(0, a11yDelta)} A11y pts, LCP +${Math.max(0, lcpDelta)} pts, CLS +${Math.max(0, clsDelta)} pts.`
+    );
+
+    this.animCycle.update((n) => n + 1);
+
+    if (shouldEmitExpand && !this.isExpanded()) {
+      this.requestExpand.emit();
+    }
+  }
+
+  dismissAutoCompareNotice(): void {
+    this.autoCompareNotice.set(null);
+  }
+
   onSelectRunA(runId: string): void {
     this.selectedRunAId.set(runId);
+    this.isAutoComparedActive.set(false);
     this.animCycle.update((n) => n + 1);
   }
 
   onSelectRunB(runId: string): void {
     this.selectedRunBId.set(runId);
+    this.isAutoComparedActive.set(false);
     this.animCycle.update((n) => n + 1);
   }
 
@@ -1037,4 +1266,3 @@ export class AuditRunComparisonComponent implements AfterViewInit, OnDestroy {
     }
   }
 }
-

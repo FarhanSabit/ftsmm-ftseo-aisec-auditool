@@ -155,6 +155,15 @@
         <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
           <button
             type="button"
+            id="drawer-auto-compare-btn"
+            class="export-pill-btn export-pill-btn--primary"
+            (click)="onAutoCompareFromHistory()"
+            title="Automatically identify the initial scan and latest optimized version and open them in the side-by-side comparison panel"
+          >
+            <span>⚡ Auto-Compare (Initial vs. Latest)</span>
+          </button>
+          <button
+            type="button"
             class="export-pill-btn"
             (click)="fbAuth.openHistoryModal()"
           >
@@ -204,7 +213,14 @@
             <li class="history-record-item">
               <div class="history-record-item__top">
                 <div>
-                  <span class="history-record-item__repo">{{ rec.repoFullName }}</span>
+                  <div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">
+                    <span class="history-record-item__repo">{{ rec.repoFullName }}</span>
+                    @if (isSignificantInitialAudit(rec)) {
+                      <span class="d3-significance-pill d3-significance-pill--initial">Initial Scan</span>
+                    } @else if (isSignificantLatestAudit(rec)) {
+                      <span class="d3-significance-pill d3-significance-pill--latest">Latest Optimized</span>
+                    }
+                  </div>
                   <span class="history-record-item__phase">
                     {{ rec.runPhase === 'lhr' ? 'Run 2 · LHR JSON' : 'Run 1 · Static Audit' }}
                   </span>
@@ -380,6 +396,15 @@
           </div>
 
           <div class="history-modal-card__top-actions">
+            <button
+              type="button"
+              id="modal-auto-compare-btn"
+              class="export-pill-btn export-pill-btn--primary"
+              (click)="onAutoCompareFromHistory()"
+              title="Identify the initial scan and latest optimized version and open them in the side-by-side comparison panel"
+            >
+              <span>⚡ Auto-Compare (Initial vs. Latest)</span>
+            </button>
             @if (modalSession.isAuthenticated) {
               <button
                 type="button"
@@ -451,6 +476,11 @@
                   <div class="clickable-report-card__top">
                     <div class="clickable-report-card__identity">
                       <span class="clickable-report-card__repo">{{ rec.repoFullName }}</span>
+                      @if (isSignificantInitialAudit(rec)) {
+                        <span class="d3-significance-pill d3-significance-pill--initial">Initial Scan</span>
+                      } @else if (isSignificantLatestAudit(rec)) {
+                        <span class="d3-significance-pill d3-significance-pill--latest">Latest Optimized</span>
+                      }
                       <span class="clickable-report-card__badge">
                         {{ rec.runPhase === 'lhr' ? 'Run 2 · Lighthouse JSON' : 'Run 1 · Static Code Audit' }}
                       </span>
@@ -686,6 +716,23 @@
 
               <button
                 type="button"
+                id="export-executive-summary-pdf-btn"
+                class="export-pill-btn export-pill-btn--exec-pdf"
+                (click)="audit.exportExecutiveSummaryPdf()"
+                title="Generate a single-page business-ready Executive Summary PDF consolidating the top 3 most critical performance and accessibility fixes"
+              >
+                <span class="file-type-indicator file-type-indicator--pdf" aria-hidden="true">
+                  <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6">
+                    <path d="M4.5 2.2h6L14.5 6.2v9.6a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1V3.2a1 1 0 0 1 1-1z" stroke-linejoin="round" />
+                    <path d="M10.2 2.2v4.2h4.3M6.8 10.2h4.4M6.8 12.8h3" stroke-linecap="round" />
+                  </svg>
+                  <span class="file-type-indicator__ext">.PDF</span>
+                </span>
+                <span>Executive Summary PDF (1-Page)</span>
+              </button>
+
+              <button
+                type="button"
                 class="export-pill-btn export-pill-btn--md"
                 (click)="audit.exportReportAsMarkdown()"
                 title="Download structured Markdown (.md) audit report"
@@ -704,7 +751,7 @@
                 type="button"
                 class="export-pill-btn export-pill-btn--pdf"
                 (click)="audit.exportReportAsPdf()"
-                title="Download formatted PDF (.pdf) audit report"
+                title="Download formatted full PDF (.pdf) audit report"
               >
                 <span class="file-type-indicator file-type-indicator--pdf" aria-hidden="true">
                   <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6">
@@ -713,7 +760,7 @@
                   </svg>
                   <span class="file-type-indicator__ext">.PDF</span>
                 </span>
-                <span>Export PDF</span>
+                <span>Export Full PDF</span>
               </button>
 
               <button
@@ -761,7 +808,7 @@
             @if (session.runPhase === 'lhr') {
               Targeted code commits mapped directly to failing audits and DOM selectors in your Lighthouse Result (LHR) JSON report.
             } @else {
-              Select the static code commits you would like to include in a pull request, download as a patch, export as Markdown or PDF documentation, or continue to a second run with a Lighthouse JSON report.
+              Select the static code commits you would like to include in a pull request, download as a patch, export as a single-page Executive Summary PDF or full Markdown/PDF documentation, or continue to a second run with a Lighthouse JSON report.
             }
           </p>
 
@@ -799,6 +846,7 @@
             [isAuthenticated]="fbAuth.isAuthenticated()"
             [isLoadingHistory]="fbAuth.isLoadingHistory()"
             (refreshHistory)="fbAuth.fetchSavedAuditsFromFirestore()"
+            (autoCompareRequested)="onAutoCompareFromHistory()"
           />
 
           <!-- SIDE-BY-SIDE AUDIT RUN COMPARISON PANEL / SUB-VIEW -->
@@ -809,48 +857,193 @@
             [totalCommitsCount]="audit.totalCommitsCount()"
             [savedAudits]="fbAuth.savedAudits()"
             [isExpanded]="isComparisonPanelOpen()"
+            [autoCompareNonce]="autoCompareNonce()"
             (toggleExpanded)="toggleComparisonPanel()"
+            (requestExpand)="openComparisonPanel()"
           />
 
-          <!-- Structured Report Preview & Export Drawer -->
+          <!-- Structured Report Preview & Single-Page Executive Summary PDF Export Drawer -->
           @if (audit.isExportDrawerOpen()) {
             @defer (on immediate) {
               @let expBundle = audit.exportBundle();
               @let mdFallback = audit.buildClientSideMarkdownFallback();
-              <section class="export-report-card" aria-label="Audit documentation export preview">
+              @let execBrief = audit.buildExecutiveSummaryMarkdown();
+              @let execFixes = audit.topThreeExecutiveFixes();
+              @let execMetrics = audit.impactMetrics();
+              <section class="export-report-card" aria-label="Audit documentation and Executive Summary PDF export preview">
                 <div class="export-report-card__head">
                   <div>
-                    <span class="soft-pill soft-pill--accent">Documentation export</span>
-                    <h2 class="export-report-card__title">Structured audit report (.md &amp; .pdf)</h2>
+                    <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
+                      <span class="soft-pill soft-pill--accent">
+                        {{
+                          audit.exportPreviewMode() === 'executive'
+                            ? 'Single-Page Executive Summary PDF (Page 1 of 1)'
+                            : 'Full Technical Audit Documentation'
+                        }}
+                      </span>
+                      <div class="history-trend-segmented" role="tablist" aria-label="Export preview format">
+                        <button
+                          type="button"
+                          class="history-trend-seg-btn"
+                          [class.is-active]="audit.exportPreviewMode() === 'executive'"
+                          role="tab"
+                          [attr.aria-selected]="audit.exportPreviewMode() === 'executive'"
+                          (click)="audit.exportPreviewMode.set('executive')"
+                        >
+                          <span>Executive Summary (Top 3 Fixes · 1-Page PDF)</span>
+                        </button>
+                        <button
+                          type="button"
+                          class="history-trend-seg-btn"
+                          [class.is-active]="audit.exportPreviewMode() === 'full'"
+                          role="tab"
+                          [attr.aria-selected]="audit.exportPreviewMode() === 'full'"
+                          (click)="audit.exportPreviewMode.set('full')"
+                        >
+                          <span>Full Technical Report (.md &amp; .pdf)</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <h2 class="export-report-card__title">
+                      {{
+                        audit.exportPreviewMode() === 'executive'
+                          ? 'Executive Summary: Top 3 Critical Performance & Accessibility Fixes'
+                          : 'Structured audit report (.md & .pdf)'
+                      }}
+                    </h2>
                     <p class="export-report-card__desc">
-                      Includes executive metadata, categories improved with code, Google Search grounded web standards citations, atomic commit summaries, unified diffs, and git reproduction commands.
+                      @if (audit.exportPreviewMode() === 'executive') {
+                        Consolidates the top 3 highest-impact Performance (Core Web Vitals LCP &amp; CLS) and Accessibility (WCAG 2.2 AA) remediations into a single-page business-ready PDF brief with before-vs-after KPIs and deployment sign-off.
+                      } @else {
+                        Includes executive metadata, categories improved with code, Google Search grounded web standards citations, all atomic commit summaries, unified diffs, and git reproduction commands.
+                      }
                     </p>
                   </div>
+
                   <div class="export-report-card__actions">
                     <button
                       type="button"
-                      class="secondary-flow-btn"
-                      (click)="copyText('exportMd', expBundle?.markdownContent || mdFallback.content)"
+                      class="primary-flow-btn"
+                      (click)="audit.exportExecutiveSummaryPdf()"
                     >
-                      <span>{{ copiedKey() === 'exportMd' ? '✓ Copied Markdown!' : 'Copy Markdown' }}</span>
+                      <span>Download Executive Summary .pdf (1-Page)</span>
+                    </button>
+                    <button
+                      type="button"
+                      class="secondary-flow-btn"
+                      (click)="
+                        copyText(
+                          'exportMd',
+                          audit.exportPreviewMode() === 'executive'
+                            ? execBrief.content
+                            : expBundle?.markdownContent || mdFallback.content
+                        )
+                      "
+                    >
+                      <span>{{ copiedKey() === 'exportMd' ? '✓ Copied!' : 'Copy Brief' }}</span>
                     </button>
                     <button
                       type="button"
                       class="secondary-flow-btn"
                       (click)="audit.exportReportAsMarkdown()"
                     >
-                      <span>Download .md</span>
+                      <span>Download Full .md</span>
                     </button>
                     <button
                       type="button"
-                      class="primary-flow-btn"
+                      class="secondary-flow-btn"
                       (click)="audit.exportReportAsPdf()"
                     >
-                      <span>Download .pdf</span>
+                      <span>Download Full .pdf</span>
                     </button>
                   </div>
                 </div>
-                <pre class="export-preview-pre"><code>{{ expBundle?.markdownContent || mdFallback.content }}</code></pre>
+
+                @if (audit.exportPreviewMode() === 'executive') {
+                  <!-- Visual Single-Page Executive Summary Sheet Preview (Top 3 Critical Performance & Accessibility Fixes) -->
+                  <div class="exec-summary-sheet" aria-label="Single-page Executive Summary preview">
+                    <div class="exec-summary-sheet__banner">
+                      <div>
+                        <span class="exec-summary-sheet__eyebrow">FRESNEL EXECUTIVE SUMMARY · SINGLE-PAGE BUSINESS BRIEF (PAGE 1 OF 1)</span>
+                        <h3 class="exec-summary-sheet__headline">
+                          {{ session.repo.fullName }} — Top 3 Critical Performance &amp; Accessibility Fixes
+                        </h3>
+                      </div>
+                      <span class="exec-summary-sheet__page-pill">Page 1 of 1 · Business-Ready PDF</span>
+                    </div>
+
+                    <div class="exec-summary-kpi-strip">
+                      <div class="exec-summary-kpi">
+                        <span class="exec-summary-kpi__label">Performance Score</span>
+                        <div class="exec-summary-kpi__val">
+                          <span>{{ execMetrics.performanceBefore }}</span>
+                          <span aria-hidden="true">→</span>
+                          <strong>{{ execMetrics.performanceAfter }}/100</strong>
+                          <span class="exec-summary-kpi__gain">+{{ execMetrics.performanceAfter - execMetrics.performanceBefore }} pts</span>
+                        </div>
+                      </div>
+                      <div class="exec-summary-kpi">
+                        <span class="exec-summary-kpi__label">Accessibility (WCAG 2.2 AA)</span>
+                        <div class="exec-summary-kpi__val">
+                          <span>{{ execMetrics.accessibilityBefore }}</span>
+                          <span aria-hidden="true">→</span>
+                          <strong>{{ execMetrics.accessibilityAfter }}/100</strong>
+                          <span class="exec-summary-kpi__gain">+{{ execMetrics.accessibilityAfter - execMetrics.accessibilityBefore }} pts</span>
+                        </div>
+                      </div>
+                      <div class="exec-summary-kpi">
+                        <span class="exec-summary-kpi__label">LCP (Hero Paint Speed)</span>
+                        <div class="exec-summary-kpi__val">
+                          <span>3.8s</span>
+                          <span aria-hidden="true">→</span>
+                          <strong>1.3s</strong>
+                          <span class="exec-summary-kpi__gain">Good (≤2.5s)</span>
+                        </div>
+                      </div>
+                      <div class="exec-summary-kpi">
+                        <span class="exec-summary-kpi__label">CLS (Layout Stability)</span>
+                        <div class="exec-summary-kpi__val">
+                          <span>0.210</span>
+                          <span aria-hidden="true">→</span>
+                          <strong>0.015</strong>
+                          <span class="exec-summary-kpi__gain">Good (≤0.10)</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="exec-summary-fixes-grid">
+                      @for (fix of execFixes; track fix.commit.id) {
+                        <article class="exec-fix-card" [class.exec-fix-card--a11y]="fix.commit.category === 'accessibility'">
+                          <div class="exec-fix-card__top">
+                            <div class="exec-fix-card__badges">
+                              <span class="exec-fix-card__rank">0{{ fix.rank }}</span>
+                              <span class="exec-fix-card__priority">{{ fix.priorityBadge }} · {{ fix.categoryBadge }}</span>
+                              <span class="exec-fix-card__target">{{ fix.metricTarget }}</span>
+                            </div>
+                            <span class="commit-sha-pill">{{ fix.commit.sha }}</span>
+                          </div>
+                          <h4 class="exec-fix-card__title">{{ imperativeHeadline(fix.commit.title) }}</h4>
+                          <p class="exec-fix-card__biz">
+                            <strong>Business &amp; UX Impact:</strong> {{ fix.businessOutcome }}
+                          </p>
+                          <p class="exec-fix-card__tech">
+                            <strong>Technical Fix:</strong> {{ detailTense(fix.commit.summary, 'done', 220) }}
+                          </p>
+                          <div class="exec-fix-card__meta">
+                            <span>Rule: <code>{{ fix.commit.ruleId }}</code></span>
+                            <span>·</span>
+                            <span>Files: <code>{{ fix.commit.files.join(', ') }}</code></span>
+                            <span>·</span>
+                            <span>Patch: <code>+{{ fix.commit.additions }} / -{{ fix.commit.deletions }}</code></span>
+                          </div>
+                        </article>
+                      }
+                    </div>
+                  </div>
+                } @else {
+                  <pre class="export-preview-pre"><code>{{ expBundle?.markdownContent || mdFallback.content }}</code></pre>
+                }
               </section>
             }
           }
@@ -1210,9 +1403,17 @@
             <button
               type="button"
               class="secondary-flow-btn"
+              (click)="audit.exportExecutiveSummaryPdf()"
+            >
+              <span>Executive Summary .pdf</span>
+            </button>
+
+            <button
+              type="button"
+              class="secondary-flow-btn"
               (click)="audit.exportReportAsPdf()"
             >
-              <span>Export .pdf</span>
+              <span>Full Report .pdf</span>
             </button>
 
             <button
@@ -1421,6 +1622,15 @@
                 </div>
 
                 <div class="saved-reports-subview__actions">
+                  <button
+                    type="button"
+                    id="view4-history-auto-compare-btn"
+                    class="export-pill-btn export-pill-btn--primary"
+                    (click)="onAutoCompareFromHistory()"
+                    title="Identify the initial scan and latest optimized version and open them in the side-by-side comparison panel"
+                  >
+                    <span>⚡ Auto-Compare (Initial vs. Latest)</span>
+                  </button>
                   @if (view4Session.isAuthenticated) {
                     <button
                       type="button"
@@ -1433,7 +1643,7 @@
                   }
                   <button
                     type="button"
-                    class="export-pill-btn export-pill-btn--primary"
+                    class="export-pill-btn"
                     [disabled]="fbAuth.isSavingAudit()"
                     (click)="onSaveAuditToAccount()"
                   >
@@ -1492,6 +1702,11 @@
                         <div class="clickable-report-card__top">
                           <div class="clickable-report-card__identity">
                             <span class="clickable-report-card__repo">{{ rec.repoFullName }}</span>
+                            @if (isSignificantInitialAudit(rec)) {
+                              <span class="d3-significance-pill d3-significance-pill--initial">Initial Scan</span>
+                            } @else if (isSignificantLatestAudit(rec)) {
+                              <span class="d3-significance-pill d3-significance-pill--latest">Latest Optimized</span>
+                            }
                             <span class="clickable-report-card__badge">
                               {{ rec.runPhase === 'lhr' ? 'Run 2 · Lighthouse JSON' : 'Run 1 · Static Code Audit' }}
                             </span>
@@ -1571,9 +1786,16 @@
             <button
               type="button"
               class="secondary-flow-btn"
+              (click)="audit.exportExecutiveSummaryPdf()"
+            >
+              Executive Summary .pdf
+            </button>
+            <button
+              type="button"
+              class="secondary-flow-btn"
               (click)="audit.exportReportAsPdf()"
             >
-              Export .pdf
+              Full Report .pdf
             </button>
             <button
               type="button"

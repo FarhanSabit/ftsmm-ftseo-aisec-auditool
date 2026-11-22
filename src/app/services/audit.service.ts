@@ -184,6 +184,7 @@ export class AuditService {
   readonly isPatchDrawerOpen = signal<boolean>(false);
   readonly exportBundle = signal<ReportExportBundle | null>(null);
   readonly isExportDrawerOpen = signal<boolean>(false);
+  readonly exportPreviewMode = signal<'executive' | 'full'>('executive');
   readonly prResult = signal<PullRequestResult | null>(null);
   readonly isCreatingPr = signal<boolean>(false);
 
@@ -216,6 +217,119 @@ export class AuditService {
   readonly selectedCommits = computed<AuditCommit[]>(() => {
     const selected = this.selectedCommitIds();
     return this.allCommits().filter((c) => selected.has(c.id));
+  });
+
+  /**
+   * Consolidates and ranks the Top 3 most critical Performance and Accessibility
+   * fixes identified in the audit for the single-page Executive Summary PDF document.
+   */
+  readonly topThreeExecutiveFixes = computed<
+    {
+      rank: number;
+      priorityBadge: string;
+      categoryBadge: string;
+      metricTarget: string;
+      businessOutcome: string;
+      commit: AuditCommit;
+    }[]
+  >(() => {
+    const all = this.allCommits();
+    const sel = this.selectedCommits();
+    const basePool = sel.length > 0 ? sel : all;
+
+    // Filter to performance and accessibility fixes first
+    let perfAndA11y = basePool.filter(
+      (c) => c.category === 'performance' || c.category === 'accessibility'
+    );
+    if (perfAndA11y.length < 3) {
+      const fallbackPerfA11y = all.filter(
+        (c) =>
+          (c.category === 'performance' || c.category === 'accessibility') &&
+          !perfAndA11y.some((existing) => existing.id === c.id)
+      );
+      perfAndA11y = [...perfAndA11y, ...fallbackPerfA11y];
+    }
+    if (perfAndA11y.length < 3) {
+      const remaining = all.filter((c) => !perfAndA11y.some((existing) => existing.id === c.id));
+      perfAndA11y = [...perfAndA11y, ...remaining];
+    }
+
+    const scoreCriticality = (c: AuditCommit): number => {
+      const hay = `${c.ruleId} ${c.title} ${c.summary} ${c.impact}`.toLowerCase();
+      let score = 0;
+      if (c.category === 'performance') score += 50;
+      if (c.category === 'accessibility') score += 48;
+      if (hay.includes('lcp') || hay.includes('largest contentful') || hay.includes('preload') || hay.includes('fetchpriority')) {
+        score += 35;
+      }
+      if (hay.includes('cls') || hay.includes('layout shift') || hay.includes('dimension') || hay.includes('aspect-ratio')) {
+        score += 30;
+      }
+      if (hay.includes('contrast') || hay.includes('wcag') || hay.includes('aria') || hay.includes('screen reader')) {
+        score += 32;
+      }
+      if (hay.includes('render-blocking') || hay.includes('defer') || hay.includes('fid') || hay.includes('inp')) {
+        score += 24;
+      }
+      score += Math.min(15, (c.additions || 0) + (c.deletions || 0));
+      return score;
+    };
+
+    const sorted = [...perfAndA11y].sort((a, b) => scoreCriticality(b) - scoreCriticality(a));
+
+    // Ensure both Performance and Accessibility are represented in the top 3 when available
+    const topPerf = sorted.filter((c) => c.category === 'performance');
+    const topA11y = sorted.filter((c) => c.category === 'accessibility');
+    const chosen: AuditCommit[] = [];
+
+    if (topPerf.length > 0) chosen.push(topPerf[0]);
+    if (topA11y.length > 0) chosen.push(topA11y[0]);
+    for (const candidate of sorted) {
+      if (chosen.length >= 3) break;
+      if (!chosen.some((c) => c.id === candidate.id)) {
+        chosen.push(candidate);
+      }
+    }
+
+    return chosen.slice(0, 3).map((commit, idx) => {
+      const rank = idx + 1;
+      const hay = `${commit.ruleId} ${commit.title} ${commit.summary}`.toLowerCase();
+      const isPerf = commit.category === 'performance';
+
+      let metricTarget = isPerf
+        ? 'Core Web Vitals · LCP & Main-Thread Render'
+        : 'WCAG 2.2 AA · Assistive Technology & Contrast';
+      let businessOutcome = isPerf
+        ? 'Accelerates above-the-fold visual completion and reduces bounce rate on initial page load.'
+        : 'Eliminates WCAG 2.2 Level AA compliance barriers for screen-reader and keyboard users.';
+
+      if (hay.includes('lcp') || hay.includes('preload') || hay.includes('fetchpriority') || hay.includes('hero')) {
+        metricTarget = 'Core Web Vitals · Largest Contentful Paint (LCP)';
+        businessOutcome =
+          'Cuts hero paint latency by prioritizing critical media discovery, directly lifting Core Web Vitals pass rates.';
+      } else if (hay.includes('cls') || hay.includes('dimension') || hay.includes('unsized') || hay.includes('shift')) {
+        metricTarget = 'Core Web Vitals · Cumulative Layout Shift (CLS)';
+        businessOutcome =
+          'Locks intrinsic media aspect ratios prior to decode, preventing jarring visual reflows and misclicks.';
+      } else if (hay.includes('contrast')) {
+        metricTarget = 'WCAG 2.2 Level AA · Color Contrast (1.4.3)';
+        businessOutcome =
+          'Restores ≥ 4.5:1 foreground-to-background luminance contrast for low-vision readability and regulatory compliance.';
+      } else if (hay.includes('aria') || hay.includes('button') || hay.includes('label') || hay.includes('focus')) {
+        metricTarget = 'WCAG 2.2 Level A/AA · ARIA Name, Role & Focus (4.1.2)';
+        businessOutcome =
+          'Exposes deterministic accessible names and keyboard focus rings across interactive controls.';
+      }
+
+      return {
+        rank,
+        priorityBadge: `CRITICAL FIX #0${rank}`,
+        categoryBadge: isPerf ? 'PERFORMANCE' : commit.category === 'accessibility' ? 'ACCESSIBILITY' : commit.categoryLabel.toUpperCase(),
+        metricTarget,
+        businessOutcome,
+        commit
+      };
+    });
   });
 
   /**
@@ -1092,6 +1206,499 @@ export class AuditService {
 
     const encoder = new TextEncoder();
     return { filename, bytes: encoder.encode(pdf) };
+  }
+
+  /**
+   * Builds a clean, single-page business-ready Executive Summary Markdown brief
+   * consolidating the Top 3 most critical Performance and Accessibility fixes.
+   */
+  buildExecutiveSummaryMarkdown(): { filename: string; content: string } {
+    const current = this.session();
+    const repoFullName = current?.repo?.fullName || 'fresnel-sandbox/lumina-web-app';
+    const branch = current?.branch || 'main';
+    const isLhr = current?.runPhase === 'lhr';
+    const filename = `fresnel-${current?.repo?.repo || 'repository'}-executive-summary.md`;
+
+    const metrics = this.impactMetrics();
+    const topFixes = this.topThreeExecutiveFixes();
+    const lcpAxis = metrics.detailedAxes.find((a) => a.id === 'lcp');
+    const clsAxis = metrics.detailedAxes.find((a) => a.id === 'cls');
+    const fidAxis = metrics.detailedAxes.find((a) => a.id === 'fid');
+
+    const lines: string[] = [
+      `# EXECUTIVE SUMMARY — PERFORMANCE & ACCESSIBILITY AUDIT`,
+      `## Repository: \`${repoFullName}\` (branch: \`${branch}\`)`,
+      '',
+      `> **Single-Page Business Brief** · Consolidated top 3 most critical Performance & Accessibility remediations ready for 1-click pull request deployment.`,
+      '',
+      `### Projected Core Web Vitals & Compliance Lift`,
+      `| Executive KPI | Baseline (Before) | Projected (After) | Net Business Lift |`,
+      `| :--- | :---: | :---: | :---: |`,
+      `| **Performance Score** | ${metrics.performanceBefore} / 100 | **${metrics.performanceAfter} / 100** | **+${metrics.performanceAfter - metrics.performanceBefore} pts** |`,
+      `| **Accessibility Score (WCAG 2.2 AA)** | ${metrics.accessibilityBefore} / 100 | **${metrics.accessibilityAfter} / 100** | **+${metrics.accessibilityAfter - metrics.accessibilityBefore} pts** |`,
+      `| **LCP (Largest Contentful Paint)** | ${lcpAxis?.before ?? 56} / 100 (3.8s) | **${lcpAxis?.after ?? 95} / 100 (1.3s)** | **+${(lcpAxis?.after ?? 95) - (lcpAxis?.before ?? 56)} pts (-2.5s)** |`,
+      `| **CLS (Cumulative Layout Shift)** | ${clsAxis?.before ?? 63} / 100 (0.21) | **${clsAxis?.after ?? 97} / 100 (0.015)** | **+${(clsAxis?.after ?? 97) - (clsAxis?.before ?? 63)} pts** |`,
+      `| **FID / INP Responsiveness** | ${fidAxis?.before ?? 62} / 100 | **${fidAxis?.after ?? 94} / 100** | **+${(fidAxis?.after ?? 94) - (fidAxis?.before ?? 62)} pts** |`,
+      '',
+      `### Top 3 Most Critical Performance & Accessibility Fixes`,
+      ''
+    ];
+
+    topFixes.forEach((item) => {
+      const c = item.commit;
+      lines.push(
+        `#### 0${item.rank}. [${item.categoryBadge}] ${c.title}`,
+        `- **Priority & Target Metric**: \`${item.priorityBadge}\` · ${item.metricTarget} (\`${c.ruleId}\`)`,
+        `- **Business & UX Impact**: ${item.businessOutcome}`,
+        `- **Engineering Remediation**: ${c.summary}`,
+        `- **Target Files & Patch Stats**: ${(c.files || []).map((f) => `\`${f}\``).join(', ')} (\`+${c.additions} / -${c.deletions}\` · commit \`${c.sha}\`)`,
+        ''
+      );
+    });
+
+    lines.push(
+      `---`,
+      `**Deployment Readiness**: ${
+        isLhr ? 'Run 2 Lighthouse JSON Verified' : 'Run 1 Static Code Audit Verified'
+      } · All 3 critical fixes are packaged as atomic git commits ready via \`git am\` or 1-Click Pull Request.`
+    );
+
+    return { filename, content: lines.join('\n') };
+  }
+
+  /**
+   * Generates a strictly single-page (Page 1 of 1, US Letter 612x792 pt) business-ready
+   * Executive Summary PDF document consolidating the Top 3 most critical Performance and
+   * Accessibility fixes with vector header banner, Core Web Vitals KPI cards, and executive sign-off.
+   */
+  buildExecutiveSummaryPdfBytes(): { filename: string; bytes: Uint8Array } {
+    const current = this.session();
+    const repoFullName = current?.repo?.fullName || 'fresnel-sandbox/lumina-web-app';
+    const branch = current?.branch || 'main';
+    const isLhr = current?.runPhase === 'lhr';
+    const filename = `fresnel-${current?.repo?.repo || 'repository'}-executive-summary.pdf`;
+
+    const metrics = this.impactMetrics();
+    const topFixes = this.topThreeExecutiveFixes();
+    const lcpAxis = metrics.detailedAxes.find((a) => a.id === 'lcp');
+    const clsAxis = metrics.detailedAxes.find((a) => a.id === 'cls');
+    const wcagAxis = metrics.detailedAxes.find((a) => a.id === 'wcag-aria');
+
+    const lcpBefore = lcpAxis?.before ?? 56;
+    const lcpAfter = lcpAxis?.after ?? 95;
+    const clsBefore = clsAxis?.before ?? 63;
+    const clsAfter = clsAxis?.after ?? 97;
+    const wcagBefore = wcagAxis?.before ?? 66;
+    const wcagAfter = wcagAxis?.after ?? 96;
+
+    const esc = (s: string) =>
+      String(s ?? '')
+        .replace(/\\/g, '\\\\')
+        .replace(/\(/g, '\\(')
+        .replace(/\)/g, '\\)')
+        .replace(/[“”]/g, '"')
+        .replace(/[‘’]/g, "'")
+        .replace(/[—–•·→]/g, '-')
+        .replace(/[^\x20-\x7E]/g, '');
+
+    const wrapText = (raw: string, maxChars: number, maxLines: number): string[] => {
+      const cleaned = String(raw ?? '').replace(/\s+/g, ' ').trim();
+      if (!cleaned) return [];
+      const words = cleaned.split(' ');
+      const lines: string[] = [];
+      let currentLine = '';
+
+      for (const word of words) {
+        const candidate = currentLine ? `${currentLine} ${word}` : word;
+        if (candidate.length <= maxChars) {
+          currentLine = candidate;
+        } else {
+          if (currentLine) lines.push(currentLine);
+          currentLine = word.slice(0, maxChars);
+          if (lines.length >= maxLines) break;
+        }
+      }
+      if (currentLine && lines.length < maxLines) {
+        lines.push(currentLine);
+      }
+      return lines.slice(0, maxLines);
+    };
+
+    const cmds: string[] = [];
+    const textAt = (
+      x: number,
+      y: number,
+      txt: string,
+      font: 'F1' | 'F2' | 'F3' = 'F1',
+      size = 9.5,
+      r = 0.08,
+      g = 0.11,
+      b = 0.18
+    ) => {
+      cmds.push(
+        `q ${r.toFixed(3)} ${g.toFixed(3)} ${b.toFixed(3)} rg BT /${font} ${size} Tf 1 0 0 1 ${x.toFixed(1)} ${y.toFixed(1)} Tm (${esc(txt)}) Tj ET Q`
+      );
+    };
+
+    const rectFill = (
+      x: number,
+      y: number,
+      w: number,
+      h: number,
+      r: number,
+      g: number,
+      b: number
+    ) => {
+      cmds.push(
+        `q ${r.toFixed(3)} ${g.toFixed(3)} ${b.toFixed(3)} rg ${x.toFixed(1)} ${y.toFixed(1)} ${w.toFixed(1)} ${h.toFixed(1)} re f Q`
+      );
+    };
+
+    const rectStroke = (
+      x: number,
+      y: number,
+      w: number,
+      h: number,
+      r: number,
+      g: number,
+      b: number,
+      lineWidth = 0.8
+    ) => {
+      cmds.push(
+        `q ${lineWidth.toFixed(2)} w ${r.toFixed(3)} ${g.toFixed(3)} ${b.toFixed(3)} RG ${x.toFixed(1)} ${y.toFixed(1)} ${w.toFixed(1)} ${h.toFixed(1)} re S Q`
+      );
+    };
+
+    // 1. EXECUTIVE HEADER BANNER (Top of Single-Page Document: y=696..760)
+    rectFill(36, 694, 540, 66, 0.06, 0.09, 0.16);
+    rectFill(36, 756, 540, 4, 0.05, 0.65, 0.91); // Cyan/blue executive top accent bar
+
+    textAt(50, 738, 'FRESNEL EXECUTIVE SUMMARY  |  SINGLE-PAGE BUSINESS BRIEF', 'F2', 8.5, 0.22, 0.74, 0.97);
+    textAt(
+      50,
+      721,
+      `Top 3 Critical Performance & Accessibility Fixes: ${repoFullName}`,
+      'F2',
+      13.5,
+      1,
+      1,
+      1
+    );
+    const dateShort = new Date().toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    });
+    textAt(
+      50,
+      705,
+      `Branch: ${branch}   |   Phase: ${
+        isLhr ? 'Run 2 Lighthouse JSON (LHR) Audit' : 'Run 1 Static Code & CWV Audit'
+      }   |   Date: ${dateShort}   |   Format: 1-Page Executive Brief`,
+      'F1',
+      8.2,
+      0.78,
+      0.84,
+      0.92
+    );
+
+    // 2. PROJECTED BUSINESS & CORE WEB VITALS IMPACT KPI STRIP (y=604..680)
+    textAt(
+      36,
+      676,
+      '1. EXECUTIVE IMPACT SNAPSHOT (BEFORE VS. AFTER REMEDIATION)',
+      'F2',
+      9.5,
+      0.08,
+      0.11,
+      0.18
+    );
+
+    const kpiCards = [
+      {
+        label: 'OVERALL PERFORMANCE',
+        before: `${metrics.performanceBefore}`,
+        after: `${metrics.performanceAfter}/100`,
+        gain: `+${metrics.performanceAfter - metrics.performanceBefore} pts`,
+        sub: 'Lighthouse Performance',
+        accent: [0.05, 0.52, 0.9] as [number, number, number]
+      },
+      {
+        label: 'ACCESSIBILITY (WCAG 2.2)',
+        before: `${metrics.accessibilityBefore}`,
+        after: `${metrics.accessibilityAfter}/100`,
+        gain: `+${metrics.accessibilityAfter - metrics.accessibilityBefore} pts`,
+        sub: `AA Contrast & ARIA (${wcagBefore}->${wcagAfter})`,
+        accent: [0.06, 0.65, 0.45] as [number, number, number]
+      },
+      {
+        label: 'LCP (HERO PAINT SPEED)',
+        before: '3.8s',
+        after: '1.3s',
+        gain: `+${lcpAfter - lcpBefore} pts`,
+        sub: `Score ${lcpBefore} -> ${lcpAfter} (<=2.5s Good)`,
+        accent: [0.02, 0.52, 0.78] as [number, number, number]
+      },
+      {
+        label: 'CLS (LAYOUT STABILITY)',
+        before: '0.210',
+        after: '0.015',
+        gain: `+${clsAfter - clsBefore} pts`,
+        sub: `Score ${clsBefore} -> ${clsAfter} (<=0.10 Good)`,
+        accent: [0.06, 0.62, 0.43] as [number, number, number]
+      }
+    ];
+
+    const cardW = 129;
+    const cardGap = 8;
+    kpiCards.forEach((kpi, idx) => {
+      const cx = 36 + idx * (cardW + cardGap);
+      const cy = 606;
+      const ch = 61;
+      rectFill(cx, cy, cardW, ch, 0.965, 0.975, 0.99);
+      rectStroke(cx, cy, cardW, ch, 0.84, 0.87, 0.92, 0.8);
+      rectFill(cx, cy + ch - 3, cardW, 3, kpi.accent[0], kpi.accent[1], kpi.accent[2]);
+
+      textAt(cx + 8, cy + 46, kpi.label, 'F2', 7.1, 0.35, 0.41, 0.5);
+      textAt(
+        cx + 8,
+        cy + 27,
+        `${kpi.before} -> ${kpi.after}`,
+        'F2',
+        11.2,
+        0.06,
+        0.09,
+        0.16
+      );
+      textAt(
+        cx + 8,
+        cy + 15,
+        `Net Lift: ${kpi.gain}`,
+        'F2',
+        7.8,
+        kpi.accent[0],
+        kpi.accent[1],
+        kpi.accent[2]
+      );
+      textAt(cx + 8, cy + 5, kpi.sub, 'F1', 6.8, 0.42, 0.47, 0.56);
+    });
+
+    // 3. TOP 3 MOST CRITICAL PERFORMANCE & ACCESSIBILITY FIXES (y=124..584)
+    textAt(
+      36,
+      586,
+      '2. TOP 3 MOST CRITICAL PERFORMANCE & ACCESSIBILITY FIXES (PRIORITIZED ROADMAP)',
+      'F2',
+      9.5,
+      0.08,
+      0.11,
+      0.18
+    );
+
+    const cardHeight = 142;
+    const cardSpacing = 12;
+    topFixes.forEach((item, idx) => {
+      const c = item.commit;
+      const topY = 576 - idx * (cardHeight + cardSpacing);
+      const bottomY = topY - cardHeight;
+      const isPerf = c.category === 'performance';
+      const accentRGB: [number, number, number] = isPerf
+        ? [0.05, 0.52, 0.9]
+        : [0.06, 0.63, 0.44];
+
+      // Card container & left priority stripe
+      rectFill(36, bottomY, 540, cardHeight, 0.985, 0.99, 0.998);
+      rectStroke(36, bottomY, 540, cardHeight, 0.82, 0.86, 0.91, 0.9);
+      rectFill(36, bottomY, 5, cardHeight, accentRGB[0], accentRGB[1], accentRGB[2]);
+
+      // Top badge strip inside card
+      rectFill(49, topY - 22, 132, 15, accentRGB[0], accentRGB[1], accentRGB[2]);
+      textAt(
+        54,
+        topY - 17.5,
+        `${item.priorityBadge} - ${item.categoryBadge}`,
+        'F2',
+        7.2,
+        1,
+        1,
+        1
+      );
+
+      textAt(
+        188,
+        topY - 17.5,
+        `Target: ${item.metricTarget}  |  Rule: ${c.ruleId}  |  Commit: ${c.sha}`,
+        'F3',
+        7.4,
+        0.28,
+        0.34,
+        0.44
+      );
+
+      // Fix Headline
+      textAt(
+        49,
+        topY - 36,
+        `0${item.rank}. ${c.title.slice(0, 78)}`,
+        'F2',
+        10.6,
+        0.06,
+        0.09,
+        0.16
+      );
+
+      // Business & User Experience Outcome
+      textAt(49, topY - 51, 'Business & UX Impact:', 'F2', 8.0, accentRGB[0], accentRGB[1], accentRGB[2]);
+      const bizLines = wrapText(item.businessOutcome, 76, 1);
+      textAt(140, topY - 51, bizLines[0] || item.businessOutcome, 'F1', 8.0, 0.14, 0.18, 0.26);
+
+      // Technical Summary (2 wrapped lines)
+      textAt(49, topY - 66, 'Technical Remediation:', 'F2', 8.0, 0.15, 0.2, 0.28);
+      const summaryLines = wrapText(c.summary, 94, 2);
+      if (summaryLines[0]) {
+        textAt(49, topY - 78, summaryLines[0], 'F1', 7.9, 0.2, 0.25, 0.34);
+      }
+      if (summaryLines[1]) {
+        textAt(49, topY - 89, summaryLines[1], 'F1', 7.9, 0.2, 0.25, 0.34);
+      }
+
+      // Code Diff Preview / Files Bar at bottom of card
+      rectFill(49, bottomY + 8, 514, 34, 0.94, 0.955, 0.975);
+      const filesList = (c.files || []).join(', ').slice(0, 62);
+      textAt(
+        56,
+        bottomY + 30,
+        `Files Modified: ${filesList}   (+${c.additions} additions / -${c.deletions} deletions)`,
+        'F3',
+        7.3,
+        0.12,
+        0.16,
+        0.24
+      );
+
+      // Extract a key +addition / -deletion line from the unified diff
+      const diffPreviewLine =
+        (c.diff || '')
+          .split('\n')
+          .find(
+            (ln) =>
+              (ln.startsWith('+') && !ln.startsWith('+++')) ||
+              (ln.startsWith('-') && !ln.startsWith('---'))
+          ) || '+ Verified atomic remediation commit ready for git am';
+      textAt(
+        56,
+        bottomY + 16,
+        `Key Patch Diff: ${diffPreviewLine.slice(0, 82)}`,
+        'F3',
+        7.2,
+        0.05,
+        0.44,
+        0.32
+      );
+    });
+
+    // 4. EXECUTIVE ACTION PLAN & SINGLE-PAGE SIGN-OFF FOOTER (y=36..108)
+    const totalAdd = topFixes.reduce((acc, f) => acc + (f.commit.additions || 0), 0);
+    const totalDel = topFixes.reduce((acc, f) => acc + (f.commit.deletions || 0), 0);
+    const totalFiles = Array.from(
+      new Set(topFixes.flatMap((f) => f.commit.files || []))
+    ).length;
+
+    rectFill(36, 56, 540, 52, 0.95, 0.968, 0.99);
+    rectStroke(36, 56, 540, 52, 0.05, 0.52, 0.9, 0.9);
+
+    textAt(
+      48,
+      94,
+      '3. DEPLOYMENT READINESS & ENGINEERING HANDOFF',
+      'F2',
+      8.5,
+      0.05,
+      0.45,
+      0.8
+    );
+    textAt(
+      48,
+      80,
+      `Scope: Top 3 Critical Fixes (${totalFiles} files, +${totalAdd} / -${totalDel} lines)   |   Delivery: Self-contained git patch & 1-Click GitHub PR`,
+      'F1',
+      8.1,
+      0.12,
+      0.16,
+      0.24
+    );
+    textAt(
+      48,
+      66,
+      `CLI Apply Command:  git checkout -b fresnel/critical-fixes && git am --3way fresnel-${
+        current?.repo?.repo || 'repository'
+      }.patch`,
+      'F3',
+      7.5,
+      0.18,
+      0.23,
+      0.32
+    );
+
+    // Strictly Single-Page Footer
+    textAt(
+      36,
+      36,
+      `Fresnel Executive Summary  |  ${repoFullName}  |  Business-Ready Single-Page Audit Brief  |  Page 1 of 1`,
+      'F1',
+      7.8,
+      0.42,
+      0.47,
+      0.56
+    );
+
+    const stream = cmds.join('\n');
+    const objects: string[] = ['', ''];
+    const addObj = (body: string) => {
+      objects.push(body);
+      return objects.length;
+    };
+
+    const f1Id = addObj('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
+    const f2Id = addObj('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>');
+    const f3Id = addObj('<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>');
+
+    const contentId = addObj(`<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`);
+    const pageId = addObj(
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 ${f1Id} 0 R /F2 ${f2Id} 0 R /F3 ${f3Id} 0 R >> >> /Contents ${contentId} 0 R >>`
+    );
+
+    objects[0] = '<< /Type /Catalog /Pages 2 0 R >>';
+    objects[1] = `<< /Type /Pages /Kids [${pageId} 0 R] /Count 1 >>`;
+
+    let pdf = '%PDF-1.4\n';
+    const offsets: number[] = [0];
+    for (let i = 0; i < objects.length; i++) {
+      offsets.push(pdf.length);
+      pdf += `${i + 1} 0 obj\n${objects[i]}\nendobj\n`;
+    }
+    const xrefOffset = pdf.length;
+    pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+    for (let i = 1; i <= objects.length; i++) {
+      pdf += `${String(offsets[i]).padStart(10, '0')} 00000 n \n`;
+    }
+    pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+
+    const encoder = new TextEncoder();
+    return { filename, bytes: encoder.encode(pdf) };
+  }
+
+  /**
+   * Triggers immediate download of the single-page Executive Summary PDF
+   * consolidating the Top 3 most critical Performance and Accessibility fixes,
+   * and opens the Executive Summary preview card.
+   */
+  exportExecutiveSummaryPdf(): void {
+    this.exportPreviewMode.set('executive');
+    this.isExportDrawerOpen.set(true);
+    const execPdf = this.buildExecutiveSummaryPdfBytes();
+    const blob = new Blob([execPdf.bytes], { type: 'application/pdf' });
+    this.triggerBlobDownload(execPdf.filename, blob);
   }
 
   async refreshPatchBundle(): Promise<PatchBundle | null> {

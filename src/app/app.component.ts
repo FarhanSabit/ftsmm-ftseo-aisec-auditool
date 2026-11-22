@@ -34,9 +34,54 @@ export class AppComponent {
   readonly repoUrl = signal<string>('');
   readonly copiedKey = signal<string | null>(null);
   readonly isComparisonPanelOpen = signal<boolean>(true);
+  readonly autoCompareNonce = signal<number>(0);
   readonly reportListAnimCycle = signal<number>(1);
   readonly isReportListEntering = signal<boolean>(true);
   private reportListAnimTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * Identifies the two most significant saved audit runs in the user's history:
+   * - initialAuditId: the earliest / initial scan
+   * - latestAuditId: the latest optimized version
+   */
+  readonly significantAuditPairIds = computed<{
+    initialAuditId: string | null;
+    latestAuditId: string | null;
+  }>(() => {
+    const saved = this.fbAuth.savedAudits();
+    if (!saved || saved.length === 0) {
+      return { initialAuditId: null, latestAuditId: null };
+    }
+    if (saved.length === 1) {
+      return { initialAuditId: null, latestAuditId: saved[0].auditId };
+    }
+
+    const sorted = [...saved].sort((a, b) => {
+      const cmp = String(a.updatedAtIso || '').localeCompare(String(b.updatedAtIso || ''));
+      if (cmp !== 0) return cmp;
+      return (
+        a.performanceAfter +
+        a.accessibilityAfter -
+        (b.performanceAfter + b.accessibilityAfter)
+      );
+    });
+
+    const initial = sorted[0];
+    const candidates = sorted.slice(1);
+    const latest = candidates.reduce(
+      (best, curr) =>
+        curr.performanceAfter + curr.accessibilityAfter >=
+        best.performanceAfter + best.accessibilityAfter
+          ? curr
+          : best,
+      candidates[candidates.length - 1]
+    );
+
+    return {
+      initialAuditId: initial.auditId,
+      latestAuditId: latest.auditId
+    };
+  });
 
   readonly allCategories: CategoryTabItem[] = [
     { key: 'all', label: 'All' },
@@ -106,6 +151,62 @@ export class AppComponent {
 
   toggleComparisonPanel(): void {
     this.isComparisonPanelOpen.update((v) => !v);
+  }
+
+  openComparisonPanel(): void {
+    this.isComparisonPanelOpen.set(true);
+  }
+
+  isSignificantInitialAudit(record: SavedAuditHistoryRecord): boolean {
+    return this.significantAuditPairIds().initialAuditId === record.auditId;
+  }
+
+  isSignificantLatestAudit(record: SavedAuditHistoryRecord): boolean {
+    return this.significantAuditPairIds().latestAuditId === record.auditId;
+  }
+
+  /**
+   * Auto-Compare handler invoked from any history list (History Drawer, Saved Audit History Modal,
+   * View 4 Saved Audit History sub-view, or History tab). Identifies the two most significant
+   * audit runs (initial scan vs. latest optimized version), ensures the report page is open,
+   * expands the side-by-side comparison panel, and loads those two runs automatically.
+   */
+  async onAutoCompareFromHistory(): Promise<void> {
+    this.fbAuth.isHistoryDrawerOpen.set(false);
+    this.fbAuth.closeHistoryModal();
+    this.fbAuth.setView4SubView('pr');
+
+    const saved = this.fbAuth.savedAudits();
+    const pair = this.significantAuditPairIds();
+    const latestRec =
+      saved.find((r) => r.auditId === pair.latestAuditId) ?? saved[0] ?? null;
+
+    const currentStep = this.audit.step();
+    const hasSession = !!this.audit.session();
+
+    if (!hasSession) {
+      if (latestRec) {
+        this.repoUrl.set(latestRec.repoUrl);
+        await this.audit.openSavedAuditReport(latestRec);
+      } else {
+        this.repoUrl.set('https://github.com/fresnel-sandbox/lumina-web-app');
+        await this.audit.startAudit('https://github.com/fresnel-sandbox/lumina-web-app', 'demo');
+        this.audit.skipToReport();
+      }
+    } else if (currentStep !== 3 && currentStep !== 7) {
+      const targetStep = this.audit.session()?.runPhase === 'lhr' ? 7 : 3;
+      this.audit.transitionToStep(targetStep);
+    }
+
+    this.isComparisonPanelOpen.set(true);
+    this.autoCompareNonce.update((n) => n + 1);
+
+    if (typeof document !== 'undefined') {
+      setTimeout(() => {
+        const el = document.getElementById('run-compare-section');
+        el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 120);
+    }
   }
 
   triggerReportListStagger(): void {
