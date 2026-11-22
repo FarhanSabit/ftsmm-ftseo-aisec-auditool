@@ -1,6 +1,10 @@
 import {
+  AfterViewInit,
   ChangeDetectionStrategy,
   Component,
+  ElementRef,
+  OnDestroy,
+  ViewChild,
   computed,
   effect,
   input,
@@ -8,6 +12,17 @@ import {
   signal,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import * as React from 'react';
+import { Root, createRoot } from 'react-dom/client';
+import {
+  Legend,
+  PolarAngleAxis,
+  PolarGrid,
+  PolarRadiusAxis,
+  Radar,
+  RadarChart,
+  Tooltip,
+} from 'recharts';
 import {
   AuditImpactMetrics,
   AuditRunPhase,
@@ -47,6 +62,7 @@ export interface ComparableAuditRun {
 export interface MetricComparisonRow {
   id: string;
   label: string;
+  shortLabel: string;
   category: 'performance' | 'accessibility' | 'secondary';
   runABefore: number;
   runAAfter: number;
@@ -72,16 +88,16 @@ export interface MetricComparisonRow {
       <div class="run-compare-card__header">
         <div class="run-compare-card__title-group">
           <div class="run-compare-card__eyebrow">
-            <span class="soft-pill soft-pill--accent">Side-by-side run comparison</span>
+            <span class="soft-pill soft-pill--accent">Expandable radar comparison view</span>
             <span class="run-compare-count-pill">
-              {{ availableRuns().length }} audit runs available
+              {{ availableRuns().length }} history runs available
             </span>
           </div>
           <h2 id="run-compare-heading" class="run-compare-card__title">
-            Compare performance &amp; accessibility improvements across audit runs
+            Compare two audit runs side-by-side with Recharts radar charts
           </h2>
           <p class="run-compare-card__subtitle">
-            Select any two audit runs (Run 1 Static Code Audit, Run 2 Lighthouse JSON Audit, or saved Firestore snapshots) to compare before-vs-after Performance, Core Web Vitals, and Accessibility gains side-by-side.
+            Select any two audit runs from your history (saved Firestore sessions, Run 1 Static Code Audit, or Run 2 Lighthouse JSON Audit) to visualize their before-vs-after Performance and Accessibility radar polygons side-by-side.
           </p>
         </div>
 
@@ -124,7 +140,7 @@ export interface MetricComparisonRow {
             <!-- Run A Selector -->
             <div class="run-selector-box run-selector-box--a">
               <div class="run-selector-box__top">
-                <span class="run-slot-badge run-slot-badge--a">Audit Run A · Baseline</span>
+                <span class="run-slot-badge run-slot-badge--a">Audit Run A · Left Radar</span>
                 @if (runA(); as a) {
                   <span class="run-source-tag">{{ a.badge }}</span>
                 }
@@ -156,7 +172,7 @@ export interface MetricComparisonRow {
             <!-- Run B Selector -->
             <div class="run-selector-box run-selector-box--b">
               <div class="run-selector-box__top">
-                <span class="run-slot-badge run-slot-badge--b">Audit Run B · Comparison</span>
+                <span class="run-slot-badge run-slot-badge--b">Audit Run B · Right Radar</span>
                 @if (runB(); as b) {
                   <span class="run-source-tag run-source-tag--accent">{{ b.badge }}</span>
                 }
@@ -198,6 +214,65 @@ export interface MetricComparisonRow {
             @let a11yGainB = b.accessibilityAfter - b.accessibilityBefore;
             @let a11yAfterDiff = b.accessibilityAfter - a.accessibilityAfter;
             @let a11yGainDiff = a11yGainB - a11yGainA;
+
+            <!-- SIDE-BY-SIDE RECHARTS RADAR CHARTS (RUN A RADAR VS RUN B RADAR) -->
+            <div class="compare-radars-grid" role="region" aria-label="Side-by-side Recharts radar charts comparing Audit Run A and Audit Run B">
+              <!-- Left Radar Chart: Audit Run A (Before vs After) -->
+              <div class="compare-radar-panel compare-radar-panel--a">
+                <div class="compare-radar-panel__head">
+                  <div>
+                    <span class="run-slot-badge run-slot-badge--a">Audit Run A</span>
+                    <h3 class="compare-radar-panel__title">{{ a.label }}</h3>
+                    <span class="compare-radar-panel__sub">
+                      {{ a.repoFullName }} · {{ a.selectedCommitsCount }}/{{ a.totalCommitsCount }} commits · {{ a.timestampLabel }}
+                    </span>
+                  </div>
+                  <div class="compare-radar-panel__kpis">
+                    <span class="history-metric-pill">
+                      Perf: <strong>{{ a.performanceBefore }}→{{ a.performanceAfter }}</strong> (+{{ perfGainA }})
+                    </span>
+                    <span class="history-metric-pill">
+                      A11y: <strong>{{ a.accessibilityBefore }}→{{ a.accessibilityAfter }}</strong> (+{{ a11yGainA }})
+                    </span>
+                  </div>
+                </div>
+
+                <div
+                  #radarHostA
+                  class="compare-radar-host recharts-host-container"
+                  role="img"
+                  [attr.aria-label]="'Recharts radar chart for Audit Run A: ' + a.label"
+                ></div>
+              </div>
+
+              <!-- Right Radar Chart: Audit Run B (Before vs After) -->
+              <div class="compare-radar-panel compare-radar-panel--b">
+                <div class="compare-radar-panel__head">
+                  <div>
+                    <span class="run-slot-badge run-slot-badge--b">Audit Run B</span>
+                    <h3 class="compare-radar-panel__title">{{ b.label }}</h3>
+                    <span class="compare-radar-panel__sub">
+                      {{ b.repoFullName }} · {{ b.selectedCommitsCount }}/{{ b.totalCommitsCount }} commits · {{ b.timestampLabel }}
+                    </span>
+                  </div>
+                  <div class="compare-radar-panel__kpis">
+                    <span class="history-metric-pill">
+                      Perf: <strong>{{ b.performanceBefore }}→{{ b.performanceAfter }}</strong> (+{{ perfGainB }})
+                    </span>
+                    <span class="history-metric-pill">
+                      A11y: <strong>{{ b.accessibilityBefore }}→{{ b.accessibilityAfter }}</strong> (+{{ a11yGainB }})
+                    </span>
+                  </div>
+                </div>
+
+                <div
+                  #radarHostB
+                  class="compare-radar-host recharts-host-container"
+                  role="img"
+                  [attr.aria-label]="'Recharts radar chart for Audit Run B: ' + b.label"
+                ></div>
+              </div>
+            </div>
 
             <!-- Side-by-Side Primary Performance & Accessibility Score Cards -->
             <div class="compare-primary-grid">
@@ -374,7 +449,7 @@ export interface MetricComparisonRow {
     </section>
   `,
 })
-export class AuditRunComparisonComponent {
+export class AuditRunComparisonComponent implements AfterViewInit, OnDestroy {
   readonly currentSession = input.required<AuditSession>();
   readonly currentMetrics = input.required<AuditImpactMetrics>();
   readonly selectedCommitsCount = input.required<number>();
@@ -383,6 +458,17 @@ export class AuditRunComparisonComponent {
   readonly isExpanded = input<boolean>(false);
 
   readonly toggleExpanded = output<void>();
+
+  @ViewChild('radarHostA')
+  private radarHostA?: ElementRef<HTMLDivElement>;
+
+  @ViewChild('radarHostB')
+  private radarHostB?: ElementRef<HTMLDivElement>;
+
+  private reactRootA: Root | null = null;
+  private reactRootB: Root | null = null;
+  private isViewReady = false;
+  private readonly animCycle = signal<number>(1);
 
   readonly selectedRunAId = signal<string>('');
   readonly selectedRunBId = signal<string>('');
@@ -610,6 +696,7 @@ export class AuditRunComparisonComponent {
     const buildRow = (
       id: string,
       label: string,
+      shortLabel: string,
       category: MetricComparisonRow['category'],
       aBefore: number,
       aAfter: number,
@@ -621,6 +708,7 @@ export class AuditRunComparisonComponent {
       return {
         id,
         label,
+        shortLabel,
         category,
         runABefore: aBefore,
         runAAfter: aAfter,
@@ -637,6 +725,7 @@ export class AuditRunComparisonComponent {
       buildRow(
         'perf-overall',
         'Performance Score (Overall)',
+        'Performance',
         'performance',
         a.performanceBefore,
         a.performanceAfter,
@@ -646,6 +735,7 @@ export class AuditRunComparisonComponent {
       buildRow(
         'perf-lcp',
         'LCP (Largest Contentful Paint)',
+        'LCP',
         'performance',
         a.lcpBefore,
         a.lcpAfter,
@@ -655,6 +745,7 @@ export class AuditRunComparisonComponent {
       buildRow(
         'perf-cls',
         'CLS (Cumulative Layout Shift)',
+        'CLS',
         'performance',
         a.clsBefore,
         a.clsAfter,
@@ -664,6 +755,7 @@ export class AuditRunComparisonComponent {
       buildRow(
         'perf-fid',
         'FID / INP (First Input Delay)',
+        'FID',
         'performance',
         a.fidBefore,
         a.fidAfter,
@@ -673,6 +765,7 @@ export class AuditRunComparisonComponent {
       buildRow(
         'a11y-overall',
         'Accessibility Score (Overall)',
+        'Accessibility',
         'accessibility',
         a.accessibilityBefore,
         a.accessibilityAfter,
@@ -682,6 +775,7 @@ export class AuditRunComparisonComponent {
       buildRow(
         'a11y-wcag',
         'WCAG 2.2 AA Contrast & ARIA Semantics',
+        'WCAG & ARIA',
         'accessibility',
         a.wcagAriaBefore,
         a.wcagAriaAfter,
@@ -691,6 +785,7 @@ export class AuditRunComparisonComponent {
       buildRow(
         'bp-overall',
         'Best Practices Score',
+        'Best Practices',
         'secondary',
         a.bestPracticesBefore,
         a.bestPracticesAfter,
@@ -700,6 +795,7 @@ export class AuditRunComparisonComponent {
       buildRow(
         'seo-overall',
         'SEO Score',
+        'SEO',
         'secondary',
         a.seoBefore,
         a.seoAfter,
@@ -721,20 +817,57 @@ export class AuditRunComparisonComponent {
         this.selectedRunAId.set(runs[0].id);
       }
       if (!curB || !runs.some((r) => r.id === curB)) {
-        // Default Run B to either the first saved Firestore audit or the complementary pass
         const firestoreOption = runs.find((r) => r.sourceType === 'firestore');
         const fallbackB = firestoreOption ?? runs[1] ?? runs[0];
         this.selectedRunBId.set(fallbackB.id);
       }
     });
+
+    effect(() => {
+      const expanded = this.isExpanded();
+      const a = this.runA();
+      const b = this.runB();
+      const cycle = this.animCycle();
+      if (expanded && a && b && this.isViewReady) {
+        setTimeout(() => {
+          this.renderSideBySideRadars(a, b, cycle);
+        }, 0);
+      }
+    });
+  }
+
+  ngAfterViewInit(): void {
+    this.isViewReady = true;
+    const a = this.runA();
+    const b = this.runB();
+    if (this.isExpanded() && a && b) {
+      this.renderSideBySideRadars(a, b, this.animCycle());
+    }
+  }
+
+  ngOnDestroy(): void {
+    this.unmountRadars();
+  }
+
+  private unmountRadars(): void {
+    if (this.reactRootA) {
+      this.reactRootA.unmount();
+      this.reactRootA = null;
+    }
+    if (this.reactRootB) {
+      this.reactRootB.unmount();
+      this.reactRootB = null;
+    }
   }
 
   onSelectRunA(runId: string): void {
     this.selectedRunAId.set(runId);
+    this.animCycle.update((n) => n + 1);
   }
 
   onSelectRunB(runId: string): void {
     this.selectedRunBId.set(runId);
+    this.animCycle.update((n) => n + 1);
   }
 
   swapRuns(): void {
@@ -742,5 +875,166 @@ export class AuditRunComparisonComponent {
     const b = this.selectedRunBId();
     this.selectedRunAId.set(b);
     this.selectedRunBId.set(a);
+    this.animCycle.update((n) => n + 1);
+  }
+
+  private buildRadarDataForRun(run: ComparableAuditRun) {
+    return [
+      {
+        metric: `LCP (${run.lcpAfter})`,
+        before: run.lcpBefore,
+        after: run.lcpAfter,
+        fullMark: 100,
+      },
+      {
+        metric: `CLS (${run.clsAfter})`,
+        before: run.clsBefore,
+        after: run.clsAfter,
+        fullMark: 100,
+      },
+      {
+        metric: `FID (${run.fidAfter})`,
+        before: run.fidBefore,
+        after: run.fidAfter,
+        fullMark: 100,
+      },
+      {
+        metric: `Perf (${run.performanceAfter})`,
+        before: run.performanceBefore,
+        after: run.performanceAfter,
+        fullMark: 100,
+      },
+      {
+        metric: `A11y (${run.accessibilityAfter})`,
+        before: run.accessibilityBefore,
+        after: run.accessibilityAfter,
+        fullMark: 100,
+      },
+      {
+        metric: `WCAG (${run.wcagAriaAfter})`,
+        before: run.wcagAriaBefore,
+        after: run.wcagAriaAfter,
+        fullMark: 100,
+      },
+    ];
+  }
+
+  private createSingleRunRadarElement(
+    run: ComparableAuditRun,
+    accentColor: string,
+    slotKey: 'A' | 'B',
+    cycle: number
+  ) {
+    const data = this.buildRadarDataForRun(run);
+    return React.createElement(
+      RadarChart,
+      {
+        width: 340,
+        height: 280,
+        cx: '50%',
+        cy: '52%',
+        outerRadius: 90,
+        data,
+      },
+      React.createElement(PolarGrid, {
+        stroke: 'var(--border-card)',
+        strokeDasharray: '3 3',
+      }),
+      React.createElement(PolarAngleAxis, {
+        dataKey: 'metric',
+        tick: {
+          fill: 'var(--text-main)',
+          fontSize: 10.5,
+          fontWeight: 600,
+        },
+      }),
+      React.createElement(PolarRadiusAxis, {
+        angle: 90,
+        domain: [0, 100],
+        tickCount: 5,
+        tick: {
+          fill: 'var(--text-muted)',
+          fontSize: 8.5,
+        },
+      }),
+      React.createElement(Radar, {
+        key: `cmp-${slotKey}-before-${run.id}-${cycle}`,
+        name: 'Before (Baseline)',
+        dataKey: 'before',
+        stroke: '#94a3b8',
+        strokeWidth: 1.6,
+        strokeDasharray: '4 3',
+        fill: '#94a3b8',
+        fillOpacity: 0.16,
+        isAnimationActive: true,
+        animationBegin: 20,
+        animationDuration: 520,
+        animationEasing: 'ease-out',
+      }),
+      React.createElement(Radar, {
+        key: `cmp-${slotKey}-after-${run.id}-${cycle}`,
+        name: `After (${run.badge})`,
+        dataKey: 'after',
+        stroke: accentColor,
+        strokeWidth: 2.4,
+        fill: accentColor,
+        fillOpacity: 0.25,
+        dot: {
+          r: 3.5,
+          fill: accentColor,
+          stroke: 'var(--bg-card)',
+          strokeWidth: 1.4,
+        },
+        isAnimationActive: true,
+        animationBegin: 65,
+        animationDuration: 650,
+        animationEasing: 'ease-out',
+      }),
+      React.createElement(Tooltip, {
+        contentStyle: {
+          borderRadius: '14px',
+          border: '1px solid var(--border-card)',
+          backgroundColor: 'var(--bg-card)',
+          color: 'var(--text-main)',
+          fontSize: '11.5px',
+          boxShadow: '0 8px 24px rgba(15, 23, 42, 0.12)',
+        },
+      }),
+      React.createElement(Legend, {
+        wrapperStyle: {
+          fontSize: '10.5px',
+          paddingTop: '4px',
+        },
+      })
+    );
+  }
+
+  private renderSideBySideRadars(
+    runA: ComparableAuditRun,
+    runB: ComparableAuditRun,
+    cycle: number
+  ): void {
+    if (typeof window === 'undefined') return;
+    const hostA = this.radarHostA?.nativeElement;
+    const hostB = this.radarHostB?.nativeElement;
+
+    if (hostA) {
+      if (!this.reactRootA) {
+        this.reactRootA = createRoot(hostA);
+      }
+      this.reactRootA.render(
+        this.createSingleRunRadarElement(runA, '#0ea5e9', 'A', cycle)
+      );
+    }
+
+    if (hostB) {
+      if (!this.reactRootB) {
+        this.reactRootB = createRoot(hostB);
+      }
+      this.reactRootB.render(
+        this.createSingleRunRadarElement(runB, 'var(--accent-primary)', 'B', cycle)
+      );
+    }
   }
 }
+

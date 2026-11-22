@@ -788,12 +788,17 @@
             </div>
           }
 
-          <!-- DYNAMIC RECHARTS RADAR CHART: BEFORE VS AFTER COMMIT IMPACT -->
+          <!-- DYNAMIC RECHARTS RADAR CHART: BEFORE VS AFTER & FIRESTORE HISTORY TRAJECTORY -->
           <app-impact-radar-chart
             [metrics]="audit.impactMetrics()"
             [selectedCount]="audit.selectedCount()"
             [totalCount]="audit.totalCommitsCount()"
             [activeCategoryTab]="audit.categoryFilter()"
+            [repoFullName]="session.repo.fullName"
+            [savedAudits]="fbAuth.savedAudits()"
+            [isAuthenticated]="fbAuth.isAuthenticated()"
+            [isLoadingHistory]="fbAuth.isLoadingHistory()"
+            (refreshHistory)="fbAuth.fetchSavedAuditsFromFirestore()"
           />
 
           <!-- SIDE-BY-SIDE AUDIT RUN COMPARISON PANEL / SUB-VIEW -->
